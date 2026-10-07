@@ -1,50 +1,62 @@
+// Einstiegspunkt: verbindet alle Bereiche. Hier nur kleine Änderungen, bitte absprechen.
+//
+//  core/     Szene, Kamera, Renderer (gemeinsam)
+//  xr/       AR-Session & Tracking         → Sümi
+//  ghosts/   Geister spawnen & Modelle     → Sümi
+//  desktop/  3D-Modus & Steuerung          → Person B
+//  game/     Zielen, Fangen, Score         → Person B
+//  ui/       Screens & Anzeigen            → Person C
+
 import * as THREE from 'three';
-import { ARButton } from 'three/addons/webxr/ARButton.js';
 import './style.css';
+import { createSceneContext } from './core/scene';
+import { setupAR } from './xr/arSession';
+import { spawnGhosts, removeGhosts } from './ghosts/ghostSpawner';
+import { DesktopMode } from './desktop/desktopMode';
+import { Game } from './game/game';
+import { Hud } from './ui/hud';
+import type { Ghost, GameMode } from './types';
 
-// --- Grundgerüst: Szene, Kamera, Renderer ---
-const scene = new THREE.Scene();
+const { scene, camera, renderer } = createSceneContext();
+const desktop = new DesktopMode(scene, camera);
+const game = new Game(camera);
+const hud = new Hud(() => game.capture());
 
-const camera = new THREE.PerspectiveCamera(
-  70,
-  window.innerWidth / window.innerHeight,
-  0.01,
-  20,
-);
-camera.position.z = 3;
+let mode: GameMode = 'desktop';
+let ghosts: Ghost[] = [];
 
-const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-renderer.setPixelRatio(window.devicePixelRatio);
-renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.xr.enabled = true;
-document.body.appendChild(renderer.domElement);
-
-// --- WebXR: Feature Detection + AR-Button ---
-if ('xr' in navigator) {
-  console.log('WebXR API available');
-  document.body.appendChild(ARButton.createButton(renderer));
-} else {
-  console.log('WebXR API not available');
+/** Neue Runde starten: alte Geister weg, neue um den Spieler spawnen. */
+function startRound(center: THREE.Vector3): void {
+  removeGhosts(scene, ghosts);
+  ghosts = spawnGhosts(scene, center);
+  game.start(ghosts);
 }
 
-// --- Platzhalter-Objekt (wird später durch Geister ersetzt) ---
-const cube = new THREE.Mesh(
-  new THREE.BoxGeometry(0.3, 0.3, 0.3),
-  new THREE.MeshNormalMaterial(),
+// Standard: 3D-Modus
+desktop.enable();
+startRound(desktop.playerPosition);
+
+// Falls verfügbar: AR-Button. Beim Wechsel wird der Modus umgeschaltet.
+setupAR(
+  renderer,
+  () => {
+    mode = 'ar';
+    desktop.disable();
+    startRound(new THREE.Vector3(0, 0, 0)); // AR: Startposition des Handys = Nullpunkt
+  },
+  () => {
+    mode = 'desktop';
+    desktop.enable();
+    startRound(desktop.playerPosition);
+  },
 );
-cube.position.set(0, 0, -1);
-scene.add(cube);
 
-// --- Fenstergröße ---
-window.addEventListener('resize', () => {
-  camera.aspect = window.innerWidth / window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
-});
-
-// --- Render-Loop ---
+// Render-Loop
+const clock = new THREE.Clock();
 renderer.setAnimationLoop(() => {
-  cube.rotation.x += 0.01;
-  cube.rotation.y += 0.01;
+  const dt = clock.getDelta();
+  if (mode === 'desktop') desktop.update(dt);
+  game.update(dt);
+  hud.update(game.snapshot);
   renderer.render(scene, camera);
 });

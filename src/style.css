@@ -1,4 +1,41 @@
 body {
   margin: 0;
   overflow: hidden;
+  font-family: system-ui, sans-serif;
+}
+
+/* Container für alle Anzeigen – bleibt in AR sichtbar (dom-overlay) */
+#ui {
+  position: fixed;
+  inset: 0;
+  pointer-events: none; /* Klicks gehen durch, außer bei Buttons */
+  color: white;
+}
+
+#ui button {
+  pointer-events: auto;
+}
+
+/* --- Platzhalter-Styles, Person C passt diese an die Mockups an --- */
+.hud-ghosts-left {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  padding: 8px 12px;
+  background: rgba(0, 0, 0, 0.6);
+  border-radius: 8px;
+}
+
+.hud-capture {
+  position: absolute;
+  bottom: 32px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  border: 3px solid #4fe39a;
+  background: rgba(0, 0, 0, 0.6);
+  color: white;
+  font-size: 14px;
 }
