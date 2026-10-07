@@ -16,15 +16,78 @@ body {
   pointer-events: auto;
 }
 
-/* --- Platzhalter-Styles, Person C passt diese an die Mockups an --- */
+/* ===== Interface (Person C) ===== */
+:root {
+  --green: #4fe39a;
+  --bg-dark: #0b1220;
+  --panel: rgba(10, 16, 26, 0.75);
+  --border: #2a3446;
+}
+
+#ui [hidden] { display: none !important; }
+
+/* --- Vollbild-Screens (Start, Game Over, ...) --- */
+.screen {
+  position: absolute;
+  inset: 0;
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-evenly;
+  padding: 24px;
+  box-sizing: border-box;
+  background: radial-gradient(circle at 50% 30%, #1d3346 0%, var(--bg-dark) 70%);
+}
+
+.start-title { text-align: center; }
+.start-ghost { font-size: 72px; filter: drop-shadow(0 0 18px #9fe8ff); }
+.start-title h1 {
+  margin: 8px 0 0;
+  font-size: clamp(40px, 10vw, 64px);
+  line-height: 1;
+  letter-spacing: 1px;
+}
+.start-title h1 span { color: var(--green); }
+
+.start-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: min(280px, 100%);
+}
+
+.btn {
+  padding: 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: white;
+  font-size: 16px;
+  cursor: pointer;
+}
+.btn-primary {
+  background: var(--green);
+  border-color: var(--green);
+  color: #0b1220;
+  font-weight: 700;
+}
+.btn:active { transform: scale(0.97); }
+
+/* --- Anzeigen während der Jagd --- */
+.hunt-layer { position: absolute; inset: 0; }
+
 .hud-ghosts-left {
   position: absolute;
   top: 16px;
   right: 16px;
-  padding: 8px 12px;
-  background: rgba(0, 0, 0, 0.6);
-  border-radius: 8px;
+  padding: 8px 14px;
+  background: var(--panel);
+  border-radius: 10px;
+  text-align: center;
 }
+.hud-ghosts-left small { display: block; font-size: 11px; opacity: 0.8; }
+.hud-ghosts-left span { font-size: 26px; font-weight: 700; }
 
 .hud-capture {
   position: absolute;
@@ -34,8 +97,8 @@ body {
   width: 80px;
   height: 80px;
   border-radius: 50%;
-  border: 3px solid #4fe39a;
-  background: rgba(0, 0, 0, 0.6);
+  border: 3px solid var(--green);
+  background: var(--panel);
   color: white;
   font-size: 14px;
 }

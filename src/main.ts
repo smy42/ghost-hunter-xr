@@ -20,7 +20,10 @@ import type { Ghost, GameMode } from './types';
 const { scene, camera, renderer } = createSceneContext();
 const desktop = new DesktopMode(scene, camera);
 const game = new Game(camera);
-const hud = new Hud(() => game.capture());
+const hud = new Hud({
+  onStart: () => startRound(desktop.playerPosition),
+  onCapture: () => game.capture(),
+});
 
 let mode: GameMode = 'desktop';
 let ghosts: Ghost[] = [];
@@ -34,7 +37,6 @@ function startRound(center: THREE.Vector3): void {
 
 // Standard: 3D-Modus
 desktop.enable();
-startRound(desktop.playerPosition);
 
 // Falls verfügbar: AR-Button. Beim Wechsel wird der Modus umgeschaltet.
 setupAR(
