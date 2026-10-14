@@ -27,6 +27,9 @@ export async function setupAR(
     optionalFeatures: ['dom-overlay'],
     domOverlay: { root: uiRoot }, // HTML-Anzeigen aus ui/ bleiben in AR sichtbar
   });
+  // Button nach oben verschieben, damit er nicht den Capture-Button verdeckt
+  button.style.bottom = 'auto';
+  button.style.top = '16px';
   document.body.appendChild(button);
 
   renderer.xr.addEventListener('sessionstart', onStart);

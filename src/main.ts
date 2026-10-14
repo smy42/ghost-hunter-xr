@@ -11,16 +11,21 @@ import * as THREE from 'three';
 import './style.css';
 import { createSceneContext } from './core/scene';
 import { setupAR } from './xr/arSession';
-import { spawnGhosts, removeGhosts } from './ghosts/ghostSpawner';
+import { spawnGhosts, removeGhosts, updateGhosts } from './ghosts/ghostSpawner';
 import { DesktopMode } from './desktop/desktopMode';
 import { Game } from './game/game';
 import { Hud } from './ui/hud';
+import { setupAtmosphere } from './effects/atmosphere';
 import type { Ghost, GameMode } from './types';
 
 const { scene, camera, renderer } = createSceneContext();
 const desktop = new DesktopMode(scene, camera);
 const game = new Game(camera);
-const hud = new Hud(() => game.capture());
+setupAtmosphere(); // vor dem HUD, damit es darunter liegt
+const hud = new Hud({
+  onStart: () => startRound(desktop.playerPosition),
+  onCapture: () => game.capture(),
+});
 
 // Desktop: Geist mit linker Maustaste oder E einfangen
 window.addEventListener('mousedown', (event) => {
@@ -53,7 +58,6 @@ function startRound(center: THREE.Vector3): void {
 
 // Standard: 3D-Modus
 desktop.enable();
-startRound(desktop.playerPosition);
 
 // Falls verfügbar: AR-Button. Beim Wechsel wird der Modus umgeschaltet.
 setupAR(
@@ -61,6 +65,7 @@ setupAR(
   () => {
     mode = 'ar';
     desktop.disable();
+    hud.showHunt(); // Startscreen ausblenden, damit man in AR die Kamera sieht
     startRound(new THREE.Vector3(0, 0, 0)); // AR: Startposition des Handys = Nullpunkt
   },
   () => {
@@ -75,6 +80,7 @@ const clock = new THREE.Clock();
 renderer.setAnimationLoop(() => {
   const dt = clock.getDelta();
   if (mode === 'desktop') desktop.update(dt);
+  updateGhosts(dt);
   game.update(dt);
   hud.update(game.snapshot);
   renderer.render(scene, camera);
