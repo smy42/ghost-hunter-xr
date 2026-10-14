@@ -118,13 +118,18 @@ export class Game {
     this.targetedGhost = null;
 
     if (ghost.type === 'evil') {
-      // Böser Geist befreit alle anderen gefangenen Geister
+      // Alle gefangenen Geister wieder freilassen
       for (const other of this.ghosts) {
         if (other !== ghost && other.caught) {
           other.caught = false;
           other.object.visible = true;
         }
       }
+
+      // Böser Geist bleibt im Spiel
+      ghost.caught = false;
+      ghost.object.visible = true;
+
     } else {
       this.score += 100;
     }
