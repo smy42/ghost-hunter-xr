@@ -44,7 +44,7 @@ const HEIGHT: Record<GhostType, number> = {
   normal: 0.45,
   fast: 0.4,
   evil: 0.5,
-  timeadd: 0.3, // breites Modell (ausgestreckte Arme) → kleiner, damit es nicht zu groß wirkt
+  timeadd: 0.4,
 };
 
 /** Durchsichtigkeit (1 = undurchsichtig) */
@@ -109,15 +109,18 @@ function setModel(ghost: Ghost): void {
 
   // SkeletonUtils.clone statt .clone(): nötig für animierte Modelle (mit Skelett)
   const instance = SkeletonUtils.clone(model.scene);
-  container.add(fitToHeight(instance, HEIGHT[ghost.type]));
 
+  // Animation ZUERST starten → Größe wird aus der animierten Pose berechnet (nicht aus der Ruhepose)
   if (model.animations.length > 0) {
     const mixer = new THREE.AnimationMixer(instance);
     const clip =
       model.animations.find((a) => a.name.includes(PREFERRED_ANIMATION)) ?? model.animations[0];
     mixer.clipAction(clip).play();
+    mixer.update(0);
     mixers.set(container, mixer);
   }
+
+  container.add(fitToHeight(instance, HEIGHT[ghost.type]));
 }
 
 // ---------- Aura (böser Geist) ----------
@@ -158,7 +161,18 @@ function createAura(height: number): THREE.Sprite {
 
 /** Skaliert das Modell auf die gewünschte Höhe, zentriert es und macht es leicht durchsichtig. */
 function fitToHeight(model: THREE.Object3D, height: number): THREE.Object3D {
-  const box = new THREE.Box3().setFromObject(model);
+  // Bei animierten Modellen (SkinnedMesh) hängt die Größe von den Knochen ab:
+  // erst alle Positionen aktualisieren, dann die Größe neu berechnen – sonst wird
+  // das Modell falsch skaliert und verschoben (war beim Timeadd-Geist so).
+  model.updateMatrixWorld(true);
+  model.traverse((child) => {
+    if (child instanceof THREE.SkinnedMesh) {
+      child.computeBoundingBox();
+      child.computeBoundingSphere();
+      child.frustumCulled = false; // animierte Modelle sonst evtl. fälschlich ausgeblendet
+    }
+  });
+  const box = new THREE.Box3().setFromObject(model, true);
   const size = box.getSize(new THREE.Vector3());
   const scale = height / (size.y || 1);
   model.scale.setScalar(scale);
@@ -228,7 +242,7 @@ function findFreePosition(center: THREE.Vector3, others: Ghost[], options: Spawn
   for (let attempt = 0; attempt < 30; attempt++) {
     const angle = Math.random() * Math.PI * 2;
     const distance = options.minRadius + Math.random() * (options.maxRadius - options.minRadius);
-    const heightOffset = -0.3 + Math.random() * 0.6; // etwa Augenhöhe ± 30 cm
+    const heightOffset = -0.7 + Math.random() * 0.9; // von ca. 70 cm unter bis 20 cm über Augenhöhe
     position = new THREE.Vector3(
       center.x + Math.cos(angle) * distance,
       center.y + heightOffset,
