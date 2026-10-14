@@ -44,13 +44,16 @@ const HEIGHT: Record<GhostType, number> = {
   normal: 0.45,
   fast: 0.4,
   evil: 0.5,
-  timeadd: 0.45,
+  timeadd: 0.3, // breites Modell (ausgestreckte Arme) → kleiner, damit es nicht zu groß wirkt
 };
 
 /** Durchsichtigkeit (1 = undurchsichtig) */
 const GHOST_OPACITY = 0.85;
 /** Wie stark die Geister auf und ab schweben (Meter) */
 const FLOAT_AMOUNT = 0.05;
+/** Farbe der Aura um den bösen Geist */
+const EVIL_AURA_COLOR = '255, 30, 20';
+
 /** Animation, die abgespielt wird, falls ein Modell Animationen hat (sonst die erste) */
 const PREFERRED_ANIMATION = 'Idle';
 
@@ -91,6 +94,8 @@ function setModel(ghost: Ghost): void {
   container.clear();
   mixers.delete(container);
 
+  if (ghost.type === 'evil') container.add(createAura(HEIGHT.evil));
+
   const model = loadedModels.get(container.userData.modelName);
   if (!model) {
     container.add(
@@ -113,6 +118,42 @@ function setModel(ghost: Ghost): void {
     mixer.clipAction(clip).play();
     mixers.set(container, mixer);
   }
+}
+
+// ---------- Aura (böser Geist) ----------
+
+let auraTexture: THREE.Texture | null = null;
+
+/** Weicher, roter Leuchtkreis als Textur (wird einmal erzeugt und wiederverwendet). */
+function getAuraTexture(): THREE.Texture {
+  if (auraTexture) return auraTexture;
+  const size = 128;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext('2d')!;
+  const gradient = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  gradient.addColorStop(0, `rgba(${EVIL_AURA_COLOR}, 0.9)`);
+  gradient.addColorStop(0.4, `rgba(${EVIL_AURA_COLOR}, 0.45)`);
+  gradient.addColorStop(1, `rgba(${EVIL_AURA_COLOR}, 0)`);
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, size, size);
+  auraTexture = new THREE.CanvasTexture(canvas);
+  return auraTexture;
+}
+
+/** Rote Aura hinter dem Geist – ein Sprite schaut immer zur Kamera. */
+function createAura(height: number): THREE.Sprite {
+  const aura = new THREE.Sprite(
+    new THREE.SpriteMaterial({
+      map: getAuraTexture(),
+      transparent: true,
+      depthWrite: false,
+    }),
+  );
+  aura.scale.setScalar(height * 1.8);
+  aura.renderOrder = -1; // hinter dem Geist zeichnen
+  aura.userData.isAura = true;
+  return aura;
 }
 
 /** Skaliert das Modell auf die gewünschte Höhe, zentriert es und macht es leicht durchsichtig. */
@@ -214,6 +255,17 @@ export function updateGhosts(dt: number): void {
     const obj = ghost.object;
     obj.position.y = obj.userData.baseY + Math.sin(t * 1.5 + obj.userData.floatOffset) * FLOAT_AMOUNT;
     mixers.get(obj)?.update(dt);
+
+    // Aura des bösen Geists pulsiert unruhig
+    if (ghost.type === 'evil') {
+      const aura = obj.children.find((c) => c.userData.isAura) as THREE.Sprite | undefined;
+      if (aura) {
+        const pulse = 0.5 + 0.5 * Math.sin(t * 3 + obj.userData.floatOffset);
+        const flicker = Math.random() < 0.05 ? 0.3 : 0; // ab und zu kurz flackern
+        aura.material.opacity = 0.55 + 0.35 * pulse - flicker;
+        aura.scale.setScalar(HEIGHT.evil * (1.6 + 0.3 * pulse));
+      }
+    }
   }
   // TODO (später): flinke Geister / Bewegung durch den Raum (für Levels)
 }
