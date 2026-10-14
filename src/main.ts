@@ -11,7 +11,7 @@ import * as THREE from 'three';
 import './style.css';
 import { createSceneContext } from './core/scene';
 import { setupAR } from './xr/arSession';
-import { spawnGhosts, removeGhosts } from './ghosts/ghostSpawner';
+import { spawnGhosts, removeGhosts, updateGhosts } from './ghosts/ghostSpawner';
 import { DesktopMode } from './desktop/desktopMode';
 import { Game } from './game/game';
 import { Hud } from './ui/hud';
@@ -58,6 +58,7 @@ const clock = new THREE.Clock();
 renderer.setAnimationLoop(() => {
   const dt = clock.getDelta();
   if (mode === 'desktop') desktop.update(dt);
+  updateGhosts(dt);
   game.update(dt);
   hud.update(game.snapshot);
   renderer.render(scene, camera);
