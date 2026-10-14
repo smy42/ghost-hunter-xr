@@ -15,11 +15,13 @@ import { spawnGhosts, removeGhosts, updateGhosts } from './ghosts/ghostSpawner';
 import { DesktopMode } from './desktop/desktopMode';
 import { Game } from './game/game';
 import { Hud } from './ui/hud';
+import { setupAtmosphere } from './effects/atmosphere';
 import type { Ghost, GameMode } from './types';
 
 const { scene, camera, renderer } = createSceneContext();
 const desktop = new DesktopMode(scene, camera);
 const game = new Game(camera);
+setupAtmosphere(); // vor dem HUD, damit es darunter liegt
 const hud = new Hud({
   onStart: () => startRound(desktop.playerPosition),
   onCapture: () => game.capture(),
@@ -44,6 +46,7 @@ setupAR(
   () => {
     mode = 'ar';
     desktop.disable();
+    hud.showHunt(); // Startscreen ausblenden, damit man in AR die Kamera sieht
     startRound(new THREE.Vector3(0, 0, 0)); // AR: Startposition des Handys = Nullpunkt
   },
   () => {

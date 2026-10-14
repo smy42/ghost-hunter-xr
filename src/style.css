@@ -102,3 +102,43 @@ body {
   color: white;
   font-size: 14px;
 }
+
+/* --- Gruselige Atmosphäre (src/effects/atmosphere.ts) --- */
+.atmosphere,
+.atmosphere > div {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* Dunkle, leicht rötliche Ränder */
+.atmosphere {
+  background: radial-gradient(
+    ellipse at center,
+    rgba(0, 0, 0, 0) 45%,
+    rgba(25, 0, 5, 0.45) 80%,
+    rgba(10, 0, 0, 0.8) 100%
+  );
+}
+
+/* Kalter, düsterer Farbstich über dem ganzen Bild */
+.atmosphere-tint {
+  background: rgba(10, 25, 40, 0.22);
+}
+
+/* Ab und zu kurzes Flackern, wie eine kaputte Lampe */
+.atmosphere-flicker {
+  background: rgba(0, 0, 0, 0.55);
+  opacity: 0;
+  animation: atmosphere-flicker 9s infinite;
+}
+
+@keyframes atmosphere-flicker {
+  0%, 61%, 63%, 65%, 100% { opacity: 0; }
+  62% { opacity: 1; }
+  64% { opacity: 0.6; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .atmosphere-flicker { animation: none; }
+}
