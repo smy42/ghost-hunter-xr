@@ -47,8 +47,10 @@ export class DesktopMode {
   }
 
   private onClick = (): void => {
+  if (!this.controls.isLocked) {
     this.controls.lock();
-  };
+  }
+};
 
   private onKeyDown = (event: KeyboardEvent): void => {
     switch (event.code) {
