@@ -39,20 +39,29 @@ export class Game {
 
   /** Wird bei jedem Tap auf den Fang-Button aufgerufen (von ui/). */
   capture(): void {
-    // TODO (Person B): Fang-Mechanik. Platzhalter: fängt einfach den ersten freien Geist.
-    const ghost = this.ghosts.find((g) => !g.caught);
+    // TODO (Person B): Fang-Mechanik. Platzhalter: fängt einfach den ersten freien (nicht bösen) Geist.
+    // TODO (Person B): Regeln je Typ (ghost.type):
+    //   fast    → mehr Taps nötig, Fangbalken sinkt schneller
+    //   evil    → gefangen: alle bereits gefangenen Geister kommen wieder frei
+    //   timeadd → gefangen: +10 Sekunden (braucht Countdown statt hochzählender Zeit)
+    const ghost = this.ghosts.find((g) => !g.caught && g.type !== 'evil');
     if (!ghost) return;
     ghost.caught = true;
     ghost.object.visible = false;
     this.score += 100;
-    if (this.ghosts.every((g) => g.caught)) this.status = 'won';
+    if (this.huntable.every((g) => g.caught)) this.status = 'won';
+  }
+
+  /** Alle Geister, die man fangen soll (der böse zählt nicht mit). */
+  private get huntable(): Ghost[] {
+    return this.ghosts.filter((g) => g.type !== 'evil');
   }
 
   /** Aktueller Stand für die Anzeige (ui/). */
   get snapshot(): GameSnapshot {
     return {
-      ghostsLeft: this.ghosts.filter((g) => !g.caught).length,
-      ghostsTotal: this.ghosts.length,
+      ghostsLeft: this.huntable.filter((g) => !g.caught).length,
+      ghostsTotal: this.huntable.length,
       score: this.score,
       time: this.time,
       status: this.status,
