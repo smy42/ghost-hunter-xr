@@ -22,6 +22,25 @@ const desktop = new DesktopMode(scene, camera);
 const game = new Game(camera);
 const hud = new Hud(() => game.capture());
 
+// Desktop: Geist mit linker Maustaste oder E einfangen
+window.addEventListener('mousedown', (event) => {
+  if (mode !== 'desktop') return;
+
+  // Nur linke Maustaste und nur bei gesperrter Maus
+  if (event.button === 0 && document.pointerLockElement) {
+    game.capture();
+  }
+});
+
+window.addEventListener('keydown', (event) => {
+  if (mode !== 'desktop') return;
+
+  // E zum Einfangen
+  if (event.code === 'KeyE' && !event.repeat && document.pointerLockElement) {
+    game.capture();
+  }
+});
+
 let mode: GameMode = 'desktop';
 let ghosts: Ghost[] = [];
 
