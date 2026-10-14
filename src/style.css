@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Creepster&display=swap');
+
 body {
   margin: 0;
   overflow: hidden;
@@ -19,14 +21,15 @@ body {
 /* ===== Interface (Person C) ===== */
 :root {
   --green: #4fe39a;
-  --bg-dark: #0b1220;
-  --panel: rgba(10, 16, 26, 0.75);
-  --border: #2a3446;
+  --blood: #b3001b;
+  --bg-dark: #07050a;
+  --panel: rgba(20, 10, 14, 0.85);
+  --border: #3a1f26;
 }
 
 #ui [hidden] { display: none !important; }
 
-/* --- Vollbild-Screens (Start, Game Over, ...) --- */
+/* --- Vollbild-Screens --- */
 .screen {
   position: absolute;
   inset: 0;
@@ -37,26 +40,177 @@ body {
   justify-content: space-evenly;
   padding: 24px;
   box-sizing: border-box;
-  background: radial-gradient(circle at 50% 30%, #1d3346 0%, var(--bg-dark) 70%);
+  background: radial-gradient(circle at 50% 35%, #1c0b11 0%, var(--bg-dark) 65%, #000 100%);
 }
 
+/* ========== STARTSCREEN ========== */
+.screen-start { overflow: hidden; }
+.screen-start.shake { animation: shake 0.4s; }
+
+.start-title, .whisper, .start-buttons { position: relative; z-index: 3; }
 .start-title { text-align: center; }
-.start-ghost { font-size: 72px; filter: drop-shadow(0 0 18px #9fe8ff); }
-.start-title h1 {
-  margin: 8px 0 0;
-  font-size: clamp(40px, 10vw, 64px);
-  line-height: 1;
-  letter-spacing: 1px;
-}
-.start-title h1 span { color: var(--green); }
 
+/* Nebel */
+.fog {
+  position: absolute;
+  inset: -50%;
+  z-index: 1;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse at 30% 40%, rgba(170, 180, 200, 0.14), transparent 40%),
+    radial-gradient(ellipse at 70% 60%, rgba(130, 140, 160, 0.12), transparent 45%),
+    radial-gradient(ellipse at 50% 85%, rgba(150, 150, 170, 0.10), transparent 40%);
+  filter: blur(20px);
+  animation: fog-drift 30s linear infinite alternate;
+}
+.fog-2 { animation-duration: 45s; animation-direction: alternate-reverse; opacity: 0.8; }
+@keyframes fog-drift {
+  from { transform: translate(-10%, 0); }
+  to   { transform: translate(10%, -5%); }
+}
+
+/* Roter Rand, pulsiert wie ein Herzschlag */
+.vignette {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  background: radial-gradient(ellipse at center, transparent 35%, rgba(70, 0, 0, 0.55) 75%, rgba(0, 0, 0, 0.95) 100%);
+  animation: heartbeat 1.6s infinite;
+}
+@keyframes heartbeat {
+  0%, 45%, 100% { opacity: 0.7; }
+  10%, 30%      { opacity: 1; }
+  20%           { opacity: 0.8; }
+}
+
+/* Geist */
+.start-ghost {
+  width: 110px;
+  margin: 0 auto;
+  filter: drop-shadow(0 0 25px rgba(200, 220, 255, 0.5));
+  animation: ghost-float 4s ease-in-out infinite, ghost-fade 7s ease-in-out infinite;
+}
+.start-ghost svg, .glimpse svg { width: 100%; display: block; }
+.ghost-body  { fill: #e6ecf2; }
+.ghost-hole  { fill: #05030a; }
+.ghost-pupil { fill: #ff1a2d; animation: pupil-glow 2s infinite; }
+
+@keyframes ghost-float {
+  0%, 100% { transform: translateY(0) rotate(-2deg); }
+  50%      { transform: translateY(-14px) rotate(2deg); }
+}
+@keyframes ghost-fade {
+  0%, 100% { opacity: 0.9; }
+  50%      { opacity: 0.45; }
+  52%      { opacity: 0.1; }
+  54%      { opacity: 0.8; }
+}
+@keyframes pupil-glow {
+  0%, 100% { opacity: 0.3; }
+  50%      { opacity: 1; }
+}
+
+/* Titel */
+.start-title h1 {
+  margin: 12px 0 0;
+  font-family: 'Creepster', system-ui, cursive;
+  font-weight: 400;
+  font-size: clamp(52px, 13vw, 96px);
+  line-height: 1;
+  letter-spacing: 3px;
+  color: #e8dede;
+  text-shadow: 0 0 6px #ff0022, 0 0 22px #8a0010, 0 0 45px #4a0008;
+  animation: title-flicker 6s infinite, title-jitter 7s infinite;
+}
+.start-title h1 span {
+  color: var(--green);
+  text-shadow: 0 0 10px var(--green), 0 0 30px #0a5c34;
+}
+@keyframes title-flicker {
+  0%, 19%, 21%, 23%, 55%, 57%, 100% { opacity: 1; }
+  20%, 22% { opacity: 0.3; }
+  56%      { opacity: 0.6; }
+}
+@keyframes title-jitter {
+  0%, 69%, 73%, 100% { transform: translate(0); }
+  70% { transform: translate(-3px, 1px) skewX(-4deg); }
+  71% { transform: translate(3px, -1px) skewX(3deg); }
+  72% { transform: translate(-1px, 2px); }
+}
+
+/* Flüstern */
+.whisper {
+  margin: 0;
+  min-height: 1.4em;
+  font-style: italic;
+  letter-spacing: 2px;
+  color: #c99;
+  text-shadow: 0 0 8px #600;
+  opacity: 0;
+  transition: opacity 1.2s;
+}
+.whisper.visible { opacity: 0.85; }
+
+/* Rote Augen im Dunkeln */
+.eyes-layer { position: absolute; inset: 0; z-index: 1; pointer-events: none; }
+.eyes {
+  position: absolute;
+  display: flex;
+  gap: 14px;
+  opacity: 0;
+  animation: eyes-blink 3s ease-in-out forwards;
+}
+.eyes i {
+  width: 10px;
+  height: 6px;
+  border-radius: 50%;
+  background: #ff1a2d;
+  box-shadow: 0 0 8px #ff1a2d, 0 0 20px #a00;
+}
+@keyframes eyes-blink {
+  0%        { opacity: 0; }
+  20%, 80%  { opacity: 1; }
+  45%, 52%  { transform: scaleY(1); }
+  48%       { transform: scaleY(0.1); }
+  100%      { opacity: 0; }
+}
+
+/* Jumpscare */
+.glimpse {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  opacity: 0;
+  background: rgba(0, 0, 0, 0.6);
+}
+.glimpse svg { width: min(70vw, 420px); filter: drop-shadow(0 0 40px red); }
+.glimpse.show { animation: glimpse 0.45s ease-out; }
+@keyframes glimpse {
+  0%   { opacity: 0; transform: scale(0.6); }
+  15%  { opacity: 1; transform: scale(1.15); }
+  60%  { opacity: 0.9; }
+  100% { opacity: 0; transform: scale(1.4); }
+}
+@keyframes shake {
+  0%, 100% { transform: translate(0); }
+  20% { transform: translate(-8px, 4px); }
+  40% { transform: translate(7px, -5px); }
+  60% { transform: translate(-5px, -3px); }
+  80% { transform: translate(4px, 5px); }
+}
+
+/* Buttons */
 .start-buttons {
   display: flex;
   flex-direction: column;
   gap: 12px;
   width: min(280px, 100%);
 }
-
 .btn {
   padding: 14px;
   border-radius: 10px;
@@ -72,7 +226,128 @@ body {
   color: #0b1220;
   font-weight: 700;
 }
+.screen-start .btn-primary { animation: pulse-glow 2s infinite; }
+.btn:hover { animation: btn-shake 0.3s; }
 .btn:active { transform: scale(0.97); }
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 8px rgba(79, 227, 154, 0.4); }
+  50%      { box-shadow: 0 0 26px rgba(79, 227, 154, 0.9); }
+}
+@keyframes btn-shake {
+  25% { transform: translateX(-2px); }
+  75% { transform: translateX(2px); }
+}
+
+/* ========== HOW TO PLAY & SETTINGS ========== */
+.screen-howto, .screen-settings {
+  justify-content: flex-start;
+  gap: 14px;
+  overflow-y: auto;
+}
+.screen-header {
+  width: 100%;
+  max-width: 480px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.screen-header h2 { margin: 0; font-size: 22px; }
+.icon-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: white;
+  font-size: 18px;
+  cursor: pointer;
+}
+
+.howto-page {
+  width: 100%;
+  max-width: 480px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.howto-goal {
+  margin: 4px 0 6px;
+  text-align: center;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--green);
+  text-shadow: 0 0 10px rgba(79, 227, 154, 0.5);
+}
+.howto-hint { margin: 4px 0; text-align: center; font-size: 13px; opacity: 0.75; }
+.howto-nav { display: flex; gap: 10px; margin-top: 6px; }
+.howto-nav .btn { flex: 1; }
+
+.card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(28, 18, 24, 0.9);
+}
+.card-icon { flex-shrink: 0; width: 40px; text-align: center; font-size: 28px; }
+.card b { display: block; }
+.card small { display: block; font-size: 13px; line-height: 1.35; opacity: 0.75; }
+.card-evil {
+  border-color: var(--blood);
+  background: rgba(60, 5, 12, 0.75);
+  box-shadow: 0 0 14px rgba(179, 0, 27, 0.4);
+}
+.card-evil b { color: #ff4d5e; }
+
+.dots { display: flex; gap: 8px; justify-content: center; margin-top: auto; }
+.dots span { width: 8px; height: 8px; border-radius: 50%; background: #3a2c33; }
+.dots span.active { background: var(--green); box-shadow: 0 0 6px var(--green); }
+
+/* Settings */
+.settings-list {
+  width: 100%;
+  max-width: 480px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(28, 18, 24, 0.9);
+  cursor: pointer;
+}
+.toggle-row small { display: block; font-size: 12px; opacity: 0.6; }
+.toggle-row input { display: none; }
+.switch {
+  position: relative;
+  flex-shrink: 0;
+  width: 46px;
+  height: 26px;
+  border-radius: 13px;
+  background: #3a2c33;
+  transition: background 0.2s;
+}
+.switch::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: white;
+  transition: transform 0.2s;
+}
+.toggle-row input:checked + .switch { background: var(--green); }
+.toggle-row input:checked + .switch::after { transform: translateX(20px); }
 
 /* --- Anzeigen während der Jagd --- */
 .hunt-layer { position: absolute; inset: 0; }
@@ -101,4 +376,50 @@ body {
   background: var(--panel);
   color: white;
   font-size: 14px;
+}
+
+/* Weniger Bewegung, wenn im System so eingestellt */
+@media (prefers-reduced-motion: reduce) {
+  .fog, .vignette, .start-ghost, .ghost-pupil, .start-title h1,
+  .eyes, .screen-start .btn-primary, .btn:hover { animation: none; }
+}
+
+/* --- Gruselige Atmosphäre (src/effects/atmosphere.ts) --- */
+.atmosphere,
+.atmosphere > div {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* Dunkle, leicht rötliche Ränder */
+.atmosphere {
+  background: radial-gradient(
+    ellipse at center,
+    rgba(0, 0, 0, 0) 45%,
+    rgba(25, 0, 5, 0.45) 80%,
+    rgba(10, 0, 0, 0.8) 100%
+  );
+}
+
+/* Kalter, düsterer Farbstich über dem ganzen Bild */
+.atmosphere-tint {
+  background: rgba(10, 25, 40, 0.22);
+}
+
+/* Ab und zu kurzes Flackern, wie eine kaputte Lampe */
+.atmosphere-flicker {
+  background: rgba(0, 0, 0, 0.55);
+  opacity: 0;
+  animation: atmosphere-flicker 9s infinite;
+}
+
+@keyframes atmosphere-flicker {
+  0%, 61%, 63%, 65%, 100% { opacity: 0; }
+  62% { opacity: 1; }
+  64% { opacity: 0.6; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .atmosphere-flicker { animation: none; }
 }
