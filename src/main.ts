@@ -16,7 +16,8 @@ import { DesktopMode } from './desktop/desktopMode';
 import { Game } from './game/game';
 import { Hud } from './ui/hud';
 import { setupAtmosphere } from './effects/atmosphere';
-import type { Ghost, GameMode } from './types';
+import { initAudio, startRoundAudio, updateAudio, playCapture, playSuccess, playWin, playGameOver } from './audio/sound';
+import type { Ghost, GameMode, GameSnapshot, RoundStatus } from './types';
 
 const { scene, camera, renderer } = createSceneContext();
 const desktop = new DesktopMode(scene, camera);
@@ -24,8 +25,12 @@ const game = new Game(camera);
 setupAtmosphere(); // vor dem HUD, damit es darunter liegt
 const hud = new Hud({
   onStart: () => startRound(desktop.playerPosition),
-  onCapture: () => game.capture(),
+  onCapture: () => {
+    playCapture();
+    game.capture();
+  },
 });
+initAudio(camera, scene, () => hud.settings.sound);
 
 let mode: GameMode = 'desktop';
 let ghosts: Ghost[] = [];
@@ -35,6 +40,7 @@ function startRound(center: THREE.Vector3): void {
   removeGhosts(scene, ghosts);
   ghosts = spawnGhosts(scene, center);
   game.start(ghosts);
+  startRoundAudio(ghosts);
 }
 
 // Standard: 3D-Modus
@@ -63,6 +69,23 @@ renderer.setAnimationLoop(() => {
   if (mode === 'desktop') desktop.update(dt);
   updateGhosts(dt);
   game.update(dt);
-  hud.update(game.snapshot);
+  const state = game.snapshot;
+  playSoundsForChanges(state);
+  updateAudio(dt, camera);
+  hud.update(state);
   renderer.render(scene, camera);
 });
+
+/** Spielt Sounds, wenn sich der Spielstand ändert (Geist gefangen, gewonnen, verloren). */
+let lastGhostsLeft = -1;
+let lastStatus: RoundStatus = 'playing';
+function playSoundsForChanges(state: GameSnapshot): void {
+  if (state.status !== lastStatus) {
+    if (state.status === 'won') playWin();
+    if (state.status === 'lost') playGameOver();
+  } else if (state.ghostsLeft < lastGhostsLeft) {
+    playSuccess();
+  }
+  lastGhostsLeft = state.ghostsLeft;
+  lastStatus = state.status;
+}
