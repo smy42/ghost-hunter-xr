@@ -35,6 +35,29 @@ initAudio(camera, scene, () => hud.settings.sound);
 let mode: GameMode = 'desktop';
 let ghosts: Ghost[] = [];
 
+// Desktop: Geist mit linker Maustaste oder E einfangen
+window.addEventListener('mousedown', (event) => {
+  if (mode !== 'desktop') return;
+
+  // Linksklick zum Fangen
+  if (event.button === 0 && document.pointerLockElement) {
+    game.capture();
+  }
+});
+
+// E-Taste zum Fangen
+window.addEventListener('keydown', (event) => {
+  if (mode !== 'desktop') return;
+
+  if (
+    event.code === 'KeyE' &&
+    !event.repeat &&
+    document.pointerLockElement
+  ) {
+    game.capture();
+  }
+});
+
 /** Neue Runde starten: alte Geister weg, neue um den Spieler spawnen. */
 function startRound(center: THREE.Vector3): void {
   removeGhosts(scene, ghosts);

@@ -1,9 +1,8 @@
 // ─────────────────────────────────────────────
-// BEREICH: Gameplay (Zielen, Fangen, Score)   →  Person B
+// BEREICH: Gameplay (Zielen, Fangen, Score) → Person B
 // ─────────────────────────────────────────────
-// Hält den Zustand einer Runde. Funktioniert in AR und im 3D-Modus gleich.
 
-import type * as THREE from 'three';
+import * as THREE from 'three';
 import type { Ghost, GameSnapshot, RoundStatus } from '../types';
 
 export class Game {
@@ -13,51 +12,140 @@ export class Game {
   private status: RoundStatus = 'playing';
   private camera: THREE.Camera;
 
+  // Zielen
+  private raycaster = new THREE.Raycaster();
+  private targetedGhost: Ghost | null = null;
+
+  // Fangmechanik
+  private captureProgress = 0;
+  private capturePerClick = 20;
+  private captureDecay = 10;
+
   constructor(camera: THREE.Camera) {
     this.camera = camera;
   }
 
-  /** Neue Runde mit den übergebenen Geistern starten. */
+  /** Neue Runde starten. */
   start(ghosts: Ghost[]): void {
     this.ghosts = ghosts;
     this.score = 0;
     this.time = 0;
     this.status = 'playing';
+    this.targetedGhost = null;
+    this.captureProgress = 0;
   }
 
-  /** Wird jeden Frame aufgerufen. dt = Sekunden seit dem letzten Frame. */
+  /** Wird jeden Frame aufgerufen. */
   update(dt: number): void {
     if (this.status !== 'playing') return;
+
     this.time += dt;
 
-    // TODO (Person B): Zielen – liegt ein Geist in der Bildschirmmitte?
-    //   Tipp: THREE.Raycaster mit setFromCamera(new THREE.Vector2(0, 0), this.camera)
-    void this.camera;
+    // Strahl aus der Bildschirmmitte
+    this.raycaster.setFromCamera(
+      new THREE.Vector2(0, 0),
+      this.camera
+    );
 
-    // TODO (Person B): Fangbalken – sinkt jeden Frame, Tap füllt ihn (siehe capture())
+    const availableGhosts = this.ghosts.filter(
+      (ghost) => !ghost.caught
+    );
+
+    const intersections = this.raycaster.intersectObjects(
+      availableGhosts.map((ghost) => ghost.object),
+      true
+    );
+
+    const previousTarget = this.targetedGhost;
+    this.targetedGhost = null;
+
+    if (intersections.length > 0) {
+      const hitObject = intersections[0].object;
+
+      this.targetedGhost = availableGhosts.find((ghost) => {
+        let object: THREE.Object3D | null = hitObject;
+
+        while (object) {
+          if (object === ghost.object) return true;
+          object = object.parent;
+        }
+
+        return false;
+      }) ?? null;
+    }
+
+    // Bei Zielwechsel Fortschritt zurücksetzen
+    if (previousTarget !== this.targetedGhost) {
+      this.captureProgress = 0;
+    }
+
+    // Schnelle Geister verlieren Fortschritt schneller
+    const decay = this.targetedGhost?.type === 'fast'
+      ? this.captureDecay * 2
+      : this.captureDecay;
+
+    this.captureProgress = Math.max(
+      0,
+      this.captureProgress - decay * dt
+    );
   }
 
-  /** Wird bei jedem Tap auf den Fang-Button aufgerufen (von ui/). */
+  /** Fangversuch durch Klick oder E. */
   capture(): void {
-    // TODO (Person B): Fang-Mechanik. Platzhalter: fängt einfach den ersten freien (nicht bösen) Geist.
-    // TODO (Person B): Regeln je Typ (ghost.type):
-    //   fast    → mehr Taps nötig, Fangbalken sinkt schneller
-    //   evil    → gefangen: alle bereits gefangenen Geister kommen wieder frei
-    //   timeadd → gefangen: +10 Sekunden (braucht Countdown statt hochzählender Zeit)
-    const ghost = this.ghosts.find((g) => !g.caught && g.type !== 'evil');
-    if (!ghost) return;
+    if (this.status !== 'playing') return;
+
+    const ghost = this.targetedGhost;
+
+    if (!ghost || ghost.caught) return;
+
+    // Flinke Geister benötigen mehr Klicks
+    const progressPerClick = ghost.type === 'fast'
+      ? 10
+      : this.capturePerClick;
+
+    this.captureProgress = Math.min(
+      100,
+      this.captureProgress + progressPerClick
+    );
+
+    // Geist noch nicht vollständig gefangen
+    if (this.captureProgress < 100) return;
+
     ghost.caught = true;
     ghost.object.visible = false;
-    this.score += 100;
-    if (this.huntable.every((g) => g.caught)) this.status = 'won';
+
+    this.captureProgress = 0;
+    this.targetedGhost = null;
+
+    if (ghost.type === 'evil') {
+      // Alle gefangenen Geister wieder freilassen
+      for (const other of this.ghosts) {
+        if (other !== ghost && other.caught) {
+          other.caught = false;
+          other.object.visible = true;
+        }
+      }
+
+      // Böser Geist bleibt im Spiel
+      ghost.caught = false;
+      ghost.object.visible = true;
+
+    } else {
+      this.score += 100;
+    }
+
+    // Alle erforderlichen Geister gefangen?
+    if (this.huntable.every((g) => g.caught)) {
+      this.status = 'won';
+    }
   }
 
-  /** Alle Geister, die man fangen soll (der böse zählt nicht mit). */
+  /** Böse Geister zählen nicht zum Fangziel. */
   private get huntable(): Ghost[] {
     return this.ghosts.filter((g) => g.type !== 'evil');
   }
 
-  /** Aktueller Stand für die Anzeige (ui/). */
+  /** Aktueller Spielstand für die UI. */
   get snapshot(): GameSnapshot {
     return {
       ghostsLeft: this.huntable.filter((g) => !g.caught).length,
