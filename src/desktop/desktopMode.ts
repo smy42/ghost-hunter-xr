@@ -46,9 +46,21 @@ export class DesktopMode {
     return new THREE.Vector3(0, DESKTOP_EYE_HEIGHT, 0);
   }
 
-  private onClick = (): void => {
+  private onClick = (event: MouseEvent): void => {
+    // Im Menü (Start, How to Play, Settings …) nicht sperren – nur im Spiel
+    if ((event.target as Element | null)?.closest('.screen')) return;
     this.controls.lock();
   };
+
+  /** Maus sperren (Cursor weg, Umschauen mit der Maus) – z. B. direkt bei „Start Hunt". */
+  lock(): void {
+    this.controls.lock();
+  }
+
+  /** Maus wieder freigeben (z. B. wenn ein Screen wie „Hunt Complete" kommt). */
+  unlock(): void {
+    this.controls.unlock();
+  }
 
   private onKeyDown = (event: KeyboardEvent): void => {
     switch (event.code) {

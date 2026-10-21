@@ -11,6 +11,8 @@ export interface HudCallbacks {
   onStart: () => void;
   /** Tap auf den Fang-Button (game/) */
   onCapture: () => void;
+  /** Zurück ins Hauptmenü (z. B. vom „Hunt Complete"-Screen) → Menü-Musik */
+  onMenu?: () => void;
 }
 
 /** Einstellungen – andere Bereiche können sie über hud.settings lesen. */
@@ -53,6 +55,11 @@ export class Hud {
   private startScreen = document.createElement('div');
   private howToScreen = document.createElement('div');
   private settingsScreen = document.createElement('div');
+  private completeScreen = document.createElement('div');
+  private lostScreen = document.createElement('div');
+  private jumpscare = document.createElement('div');
+  private completeTimer = 0;
+  private lastStatus: GameSnapshot['status'] = 'playing';
   private screens: HTMLElement[] = [];
   private howToPage = 0;
 
@@ -62,6 +69,16 @@ export class Hud {
   private ghostsLeftNumber = document.createElement('span');
   private captureButton = document.createElement('button');
   private lastGhostsLeft = -1;
+  private crosshair = document.createElement('div');
+  private timer = document.createElement('div');
+  private timerValue = document.createElement('span');
+  private timerWhisper = document.createElement('small');
+  private danger = document.createElement('div');
+  private lastTimerText = '';
+  private lastTimeLeft = Infinity;
+  private lastAimKey = '';
+  private popup = document.createElement('div');
+  private popupTimer = 0;
 
   constructor(callbacks: HudCallbacks) {
     this.callbacks = callbacks;
@@ -69,12 +86,28 @@ export class Hud {
     this.buildHowToScreen();
     this.buildSettingsScreen();
     this.buildHuntLayer();
+    this.buildCompleteScreen();
+    this.buildLostScreen();
 
-    this.screens = [this.startScreen, this.howToScreen, this.settingsScreen, this.huntLayer];
+    this.screens = [
+      this.startScreen,
+      this.howToScreen,
+      this.settingsScreen,
+      this.huntLayer,
+      this.completeScreen,
+      this.lostScreen,
+    ];
     this.root.append(...this.screens);
+
+    // Jumpscare liegt über allem
+    this.jumpscare.className = 'jumpscare';
+    this.jumpscare.hidden = true;
+    this.jumpscare.innerHTML = `<div class="jumpscare-ghost">${GHOST_SVG}</div>`;
+    this.root.append(this.jumpscare);
 
     this.startScaryEffects();
     this.showStart();
+    this.buildEnterGate();
 
     // TODO (Person C): Fadenkreuz, Fangbalken, Pfeil mit Distanz, Radar
     // TODO (Person C): Screens – Hunt Complete, Game Over, Pause
@@ -83,6 +116,37 @@ export class Hud {
   /** Aktuelle Einstellungen (z. B. hud.settings.sound) */
   get settings(): Settings {
     return this.settingsState;
+  }
+
+  // ---------- Eingangsbildschirm ----------
+
+  /**
+   * „Tippen zum Betreten" – liegt über dem Startscreen.
+   * Browser spielen erst nach einem Tippen / Tastendruck Ton ab; dieser eine Tipp
+   * schaltet die Musik frei (audio/sound.ts), danach erscheint der Startscreen mit Musik.
+   */
+  private buildEnterGate(): void {
+    const gate = document.createElement('div');
+    gate.className = 'screen screen-enter';
+    gate.innerHTML = `
+      <div class="fog"></div>
+      <div class="vignette"></div>
+      <div class="enter-content">
+        <div class="enter-ghost">${GHOST_SVG}</div>
+        <p class="enter-text">Tap to enter</p>
+        <p class="enter-hint">🎧 Headphones recommended</p>
+      </div>
+    `;
+    this.root.append(gate);
+
+    const enter = () => {
+      document.removeEventListener('click', enter);
+      document.removeEventListener('keydown', enter);
+      gate.classList.add('leaving');
+      setTimeout(() => gate.remove(), 900);
+    };
+    document.addEventListener('click', enter);
+    document.addEventListener('keydown', enter);
   }
 
   // ---------- Startscreen ----------
@@ -279,7 +343,215 @@ export class Hud {
       this.callbacks.onCapture();
     });
 
-    this.huntLayer.append(this.ghostsLeft, this.captureButton);
+    this.popup.className = 'hud-popup';
+    this.popup.setAttribute('role', 'status');
+    this.popup.hidden = true;
+
+    // Fadenkreuz mit Fangbalken (Ring füllt sich beim Fangen)
+    this.crosshair.className = 'crosshair';
+    this.crosshair.innerHTML = `
+      <svg viewBox="0 0 100 100" aria-hidden="true">
+        <circle class="ch-track" cx="50" cy="50" r="40"/>
+        <circle class="ch-progress" cx="50" cy="50" r="40" pathLength="100"/>
+        <g class="ch-ticks">
+          <path d="M50 4v12M50 84v12M4 50h12M84 50h12"/>
+        </g>
+        <circle class="ch-dot" cx="50" cy="50" r="2.5"/>
+      </svg>
+      <span class="ch-label"></span>
+    `;
+
+    // Timer oben in der Mitte + roter Rand, der bei wenig Zeit pulsiert
+    this.timer.className = 'hud-timer';
+    this.timerWhisper.className = 'timer-whisper';
+    this.timer.append(this.timerValue, this.timerWhisper);
+    this.danger.className = 'hud-danger';
+
+    this.huntLayer.append(this.danger, this.crosshair, this.timer, this.ghostsLeft, this.captureButton, this.popup);
+  }
+
+  /**
+   * Timer aktualisieren (jeden Frame aus main.ts).
+   * Ab 20 s rot + Herzschlag-Puls, ab 10 s zittert er und flüstert.
+   */
+  updateTimer(timeLeft: number): void {
+    // Zeit ist gestiegen → Time-Geist gefangen → goldenes Aufblitzen
+    if (timeLeft > this.lastTimeLeft + 1) {
+      this.timer.classList.remove('bonus');
+      void this.timer.offsetWidth;
+      this.timer.classList.add('bonus');
+    }
+    this.lastTimeLeft = timeLeft;
+
+    const seconds = Math.ceil(timeLeft);
+    const text = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+    if (text !== this.lastTimerText) {
+      this.timerValue.textContent = text;
+      this.lastTimerText = text;
+      this.timer.classList.toggle('is-low', seconds <= 20);
+      this.timer.classList.toggle('is-critical', seconds <= 10);
+      this.timerWhisper.textContent =
+        seconds <= 10 && this.settingsState.scary ? WHISPERS_LOW[seconds % WHISPERS_LOW.length] : '';
+    }
+    // Roter Rand wird stärker, je weniger Zeit bleibt
+    const danger = timeLeft <= 20 ? 1 - timeLeft / 20 : 0;
+    this.danger.style.setProperty('--danger', danger.toFixed(2));
+  }
+
+  /**
+   * Fadenkreuz & Fangbalken aktualisieren (jeden Frame aus main.ts).
+   * @param aim worauf gezielt wird (null = nichts) und Fortschritt 0–100
+   */
+  updateAim(aim: { type: string | null; progress: number; tooFar: boolean }): void {
+    const progress = Math.round(aim.progress);
+    const key = `${aim.type}|${progress}|${aim.tooFar}`;
+    if (key === this.lastAimKey) return;
+    this.lastAimKey = key;
+
+    const inRange = aim.type !== null && !aim.tooFar;
+    this.crosshair.classList.toggle('is-far', aim.tooFar);
+    this.crosshair.classList.toggle('is-target', inRange);
+    this.crosshair.classList.toggle('is-evil', inRange && aim.type === 'evil');
+    this.crosshair.classList.toggle('is-time', inRange && aim.type === 'timeadd');
+    this.crosshair.classList.toggle('is-fast', inRange && aim.type === 'fast');
+    this.crosshair.style.setProperty('--progress', String(progress));
+    const label = this.crosshair.querySelector<HTMLElement>('.ch-label')!;
+    label.textContent = aim.tooFar
+      ? 'GET CLOSER…'
+      : aim.type === 'timeadd' ? '+10 s'
+      : aim.type === 'fast' ? 'TAP FAST!'
+      : ''; // beim bösen Geist bewusst KEIN Text – nur rotes Fadenkreuz
+  }
+
+  /** true, solange die Jagd-Anzeige sichtbar ist (nicht im Menü / Endscreen) */
+  get isHunting(): boolean {
+    return !this.huntLayer.hidden;
+  }
+
+  /**
+   * Kurzes Popup während der Jagd, das von selbst wieder verschwindet.
+   * @param kind 'evil' (rot) oder 'time' (gold) – bestimmt Farbe & Vibration
+   */
+  showPopup(kind: 'evil' | 'time', title: string, text: string): void {
+    this.popup.className = `hud-popup hud-popup-${kind}`;
+    this.popup.innerHTML = `<b>${title}</b><small>${text}</small>`;
+    this.popup.hidden = false;
+    void this.popup.offsetWidth; // Animation neu starten
+    this.popup.classList.add('visible');
+    this.vibrate(kind === 'evil' ? [80, 60, 160] : 40);
+
+    window.clearTimeout(this.popupTimer);
+    this.popupTimer = window.setTimeout(() => {
+      this.popup.classList.remove('visible');
+      this.popupTimer = window.setTimeout(() => (this.popup.hidden = true), 400);
+    }, kind === 'evil' ? 3200 : 2200);
+  }
+
+  // ---------- Hunt Complete (Runde gewonnen) ----------
+
+  private buildCompleteScreen(): void {
+    this.completeScreen.className = 'screen screen-complete';
+    this.completeScreen.innerHTML = `
+      <div class="fog"></div>
+      <div class="vignette"></div>
+
+      <div class="complete-title">
+        <div class="complete-ghost">${GHOST_SVG}</div>
+        <h1>HUNT<br>COMPLETE</h1>
+        <p class="complete-sub">The house is quiet… for now.</p>
+      </div>
+
+      <div class="complete-stats">
+        <div><small>Ghosts caught</small><b data-stat="ghosts">0</b></div>
+        <div><small>Score</small><b data-stat="score">0</b></div>
+        <div><small>Time</small><b data-stat="time">0:00</b></div>
+      </div>
+
+      <div class="start-buttons">
+        <button class="btn btn-primary" data-action="next">Next Level ▶</button>
+        <button class="btn" data-action="menu">Main Menu</button>
+      </div>
+    `;
+
+    this.onAction(this.completeScreen, {
+      // TODO (Level-System): hier das nächste Level laden – vorerst einfach neue Runde
+      next: () => this.startHunt(),
+      menu: () => {
+        this.callbacks.onMenu?.();
+        this.showStart();
+      },
+    });
+  }
+
+  // ---------- Game Over (Zeit abgelaufen) ----------
+
+  private buildLostScreen(): void {
+    this.lostScreen.className = 'screen screen-lost';
+    this.lostScreen.innerHTML = `
+      <div class="fog"></div>
+      <div class="fog fog-2"></div>
+      <div class="vignette"></div>
+
+      <div class="lost-title">
+        <h1>THEY<br>GOT YOU</h1>
+        <p class="lost-sub">Time ran out… and they found you first.</p>
+      </div>
+
+      <div class="complete-stats">
+        <div><small>Ghosts caught</small><b data-stat="ghosts">0</b></div>
+        <div><small>Score</small><b data-stat="score">0</b></div>
+      </div>
+
+      <div class="start-buttons">
+        <button class="btn btn-blood" data-action="retry">↻&nbsp; Try Again</button>
+        <button class="btn" data-action="menu">Main Menu</button>
+      </div>
+    `;
+
+    this.onAction(this.lostScreen, {
+      retry: () => this.startHunt(),
+      menu: () => {
+        this.callbacks.onMenu?.();
+        this.showStart();
+      },
+    });
+  }
+
+  private showLost(state: GameSnapshot): void {
+    const set = (stat: string, value: string) =>
+      (this.lostScreen.querySelector<HTMLElement>(`[data-stat="${stat}"]`)!.textContent = value);
+    set('ghosts', `${state.ghostsTotal - state.ghostsLeft}/${state.ghostsTotal}`);
+    set('score', String(state.score));
+    this.show(this.lostScreen);
+  }
+
+  /** Geist springt ins Bild (nur wenn „scary" an ist), danach der Game-Over-Screen. */
+  private playJumpscare(then: () => void): void {
+    if (!this.settingsState.scary) {
+      window.setTimeout(then, 600);
+      return;
+    }
+    this.huntLayer.hidden = true; // Timer & Fadenkreuz weg – nur noch der Geist
+    this.jumpscare.hidden = false;
+    this.jumpscare.classList.remove('go');
+    void this.jumpscare.offsetWidth;
+    this.jumpscare.classList.add('go');
+    this.vibrate([300, 80, 400]);
+    window.setTimeout(() => {
+      then();
+      this.jumpscare.hidden = true;
+      this.jumpscare.classList.remove('go');
+    }, 1100);
+  }
+
+  private showComplete(state: GameSnapshot): void {
+    const set = (stat: string, value: string) =>
+      (this.completeScreen.querySelector<HTMLElement>(`[data-stat="${stat}"]`)!.textContent = value);
+    set('ghosts', `${state.ghostsTotal - state.ghostsLeft}/${state.ghostsTotal}`);
+    set('score', String(state.score));
+    const seconds = Math.floor(state.time);
+    set('time', `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`);
+    this.show(this.completeScreen);
   }
 
   // ---------- Screens wechseln (immer nur EIN Screen sichtbar) ----------
@@ -303,6 +575,7 @@ export class Hud {
 
   /** Öffentlich, damit z. B. beim AR-Start direkt die Jagd-Anzeige kommt. */
   showHunt(): void {
+    this.lastTimeLeft = Infinity; // neue Runde → kein „Bonus"-Aufblitzen beim Start
     this.show(this.huntLayer);
   }
 
@@ -332,9 +605,24 @@ export class Hud {
       this.ghostsLeftNumber.textContent = String(state.ghostsLeft);
       this.lastGhostsLeft = state.ghostsLeft;
     }
-    // TODO (Person C): Hunt Complete / Game Over anzeigen, wenn state.status !== 'playing'
+    // Runde gewonnen → kurz warten (letzter Fang soll noch wirken), dann „Hunt Complete"
+    if (state.status !== this.lastStatus) {
+      window.clearTimeout(this.completeTimer);
+      if (state.status === 'won') this.completeTimer = window.setTimeout(() => this.showComplete(state), 1300);
+      if (state.status === 'lost') this.playJumpscare(() => this.showLost(state));
+      this.lastStatus = state.status;
+    }
   }
 }
+
+/** Flüstern unter dem Timer in den letzten 10 Sekunden */
+const WHISPERS_LOW = [
+  "they're coming…",
+  'behind you',
+  'too late',
+  'run',
+  'can you hear them?',
+];
 
 // ---------- HTML-Bausteine ----------
 

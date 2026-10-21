@@ -2,6 +2,8 @@
 // BEREICH: Geister spawnen & Modelle   →  Sümi
 // ─────────────────────────────────────────────
 // Erzeugt die Geister zufällig im Umkreis um einen Mittelpunkt.
+// Die Geister kommen NACHEINANDER: am Anfang sind ein paar da, der Rest erscheint nach und nach
+// (siehe START_GHOSTS, SPAWN_INTERVAL, MAX_VISIBLE). Böser & Time-Geist kommen nie gleich am Anfang.
 // Jeder Geist hat einen Typ (normal, fast, evil, timeadd) mit eigenem Modell.
 // Solange ein Modell noch lädt (oder fehlt), wird eine Kugel als Platzhalter angezeigt.
 
@@ -53,6 +55,19 @@ const GHOST_OPACITY = 0.85;
 const FLOAT_AMOUNT = 0.05;
 /** Farbe der Aura um den bösen Geist */
 const EVIL_AURA_COLOR = '255, 30, 20';
+/** Farbe der Aura + Funken beim Time-Geist (Gold) */
+const TIME_AURA_COLOR = '255, 200, 60';
+/** Anzahl der Funken, die um den Time-Geist kreisen */
+const TIME_SPARKS = 3;
+
+/** Wie viele (normale) Geister gleich zu Beginn der Runde da sind */
+const START_GHOSTS = 2;
+/** Zeitabstand, in dem der nächste Geist erscheint (Sekunden, min–max) */
+const SPAWN_INTERVAL: [number, number] = [5, 8];
+/** Höchstens so viele Geister gleichzeitig sichtbar – sonst wartet der nächste */
+const MAX_VISIBLE = 4;
+/** Dauer, in der ein neuer Geist „aufwächst" (Sekunden) */
+const APPEAR_DURATION = 0.6;
 
 /** Animation, die abgespielt wird, falls ein Modell Animationen hat (sonst die erste) */
 const PREFERRED_ANIMATION = 'Idle';
@@ -69,6 +84,12 @@ const loadedModels = new Map<string, LoadedModel>();
 const activeGhosts: Ghost[] = [];
 /** Animations-Mixer pro Geist (nur für Modelle mit Animationen) */
 const mixers = new Map<THREE.Object3D, THREE.AnimationMixer>();
+
+/** Geister, die in dieser Runde noch erscheinen werden (in Reihenfolge) */
+let spawnQueue: Ghost[] = [];
+let nextSpawnIn = 0;
+let spawnCenter = new THREE.Vector3();
+let spawnOptions: SpawnOptions = DEFAULT_SPAWN;
 
 const loader = new GLTFLoader();
 loader.setMeshoptDecoder(MeshoptDecoder); // die Modelle sind komprimiert (meshopt)
@@ -94,7 +115,11 @@ function setModel(ghost: Ghost): void {
   container.clear();
   mixers.delete(container);
 
-  if (ghost.type === 'evil') container.add(createAura(HEIGHT.evil));
+  if (ghost.type === 'evil') container.add(createAura(HEIGHT.evil, EVIL_AURA_COLOR));
+  if (ghost.type === 'timeadd') {
+    container.add(createAura(HEIGHT.timeadd, TIME_AURA_COLOR));
+    container.add(createSparks(HEIGHT.timeadd));
+  }
 
   const model = loadedModels.get(container.userData.modelName);
   if (!model) {
@@ -123,32 +148,34 @@ function setModel(ghost: Ghost): void {
   container.add(fitToHeight(instance, HEIGHT[ghost.type]));
 }
 
-// ---------- Aura (böser Geist) ----------
+// ---------- Aura (böser Geist: rot, Time-Geist: gold) ----------
 
-let auraTexture: THREE.Texture | null = null;
+const auraTextures = new Map<string, THREE.Texture>();
 
-/** Weicher, roter Leuchtkreis als Textur (wird einmal erzeugt und wiederverwendet). */
-function getAuraTexture(): THREE.Texture {
-  if (auraTexture) return auraTexture;
+/** Weicher Leuchtkreis in einer Farbe als Textur (pro Farbe einmal erzeugt und wiederverwendet). */
+function getAuraTexture(color: string): THREE.Texture {
+  const cached = auraTextures.get(color);
+  if (cached) return cached;
   const size = 128;
   const canvas = document.createElement('canvas');
   canvas.width = canvas.height = size;
   const ctx = canvas.getContext('2d')!;
   const gradient = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
-  gradient.addColorStop(0, `rgba(${EVIL_AURA_COLOR}, 0.9)`);
-  gradient.addColorStop(0.4, `rgba(${EVIL_AURA_COLOR}, 0.45)`);
-  gradient.addColorStop(1, `rgba(${EVIL_AURA_COLOR}, 0)`);
+  gradient.addColorStop(0, `rgba(${color}, 0.9)`);
+  gradient.addColorStop(0.4, `rgba(${color}, 0.45)`);
+  gradient.addColorStop(1, `rgba(${color}, 0)`);
   ctx.fillStyle = gradient;
   ctx.fillRect(0, 0, size, size);
-  auraTexture = new THREE.CanvasTexture(canvas);
-  return auraTexture;
+  const texture = new THREE.CanvasTexture(canvas);
+  auraTextures.set(color, texture);
+  return texture;
 }
 
-/** Rote Aura hinter dem Geist – ein Sprite schaut immer zur Kamera. */
-function createAura(height: number): THREE.Sprite {
+/** Aura hinter dem Geist – ein Sprite schaut immer zur Kamera. */
+function createAura(height: number, color: string): THREE.Sprite {
   const aura = new THREE.Sprite(
     new THREE.SpriteMaterial({
-      map: getAuraTexture(),
+      map: getAuraTexture(color),
       transparent: true,
       depthWrite: false,
     }),
@@ -157,6 +184,28 @@ function createAura(height: number): THREE.Sprite {
   aura.renderOrder = -1; // hinter dem Geist zeichnen
   aura.userData.isAura = true;
   return aura;
+}
+
+/** Goldene Funken, die um den Time-Geist kreisen (wie ein Uhrzeiger). */
+function createSparks(height: number): THREE.Group {
+  const sparks = new THREE.Group();
+  for (let i = 0; i < TIME_SPARKS; i++) {
+    const spark = new THREE.Sprite(
+      new THREE.SpriteMaterial({
+        map: getAuraTexture(TIME_AURA_COLOR),
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending, // leuchtet heller
+      }),
+    );
+    spark.scale.setScalar(height * 0.25);
+    const angle = (i / TIME_SPARKS) * Math.PI * 2;
+    spark.position.set(Math.cos(angle) * height * 0.75, 0, Math.sin(angle) * height * 0.75);
+    sparks.add(spark);
+  }
+  sparks.rotation.x = 0.35; // leicht schräge Umlaufbahn
+  sparks.userData.isSparks = true;
+  return sparks;
 }
 
 /** Skaliert das Modell auf die gewünschte Höhe, zentriert es und macht es leicht durchsichtig. */
@@ -209,31 +258,69 @@ export function spawnGhosts(
   center: THREE.Vector3,
   options: SpawnOptions = DEFAULT_SPAWN,
 ): Ghost[] {
-  const ghosts: Ghost[] = [];
-  const types = (Object.keys(options.mix) as GhostType[]).flatMap((type) =>
-    Array<GhostType>(options.mix[type]).fill(type),
-  );
+  spawnCenter = center.clone();
+  spawnOptions = options;
 
-  types.forEach((type, id) => {
+  const ghosts: Ghost[] = spawnOrder(options.mix).map((type, id) => {
     const container = new THREE.Group();
     const variants = MODELS[type];
     container.userData.modelName = variants[Math.floor(Math.random() * variants.length)];
-
-    const position = findFreePosition(center, ghosts, options);
-    container.position.copy(position);
-    container.userData.baseY = position.y;
     container.userData.floatOffset = Math.random() * Math.PI * 2; // nicht alle schweben gleich
-    // Geist schaut zum Spieler (nur um die Hochachse drehen)
-    container.lookAt(center.x, position.y, center.z);
+    // Noch nicht erschienen → unsichtbar (game/ ignoriert unsichtbare Geister)
+    container.visible = false;
     scene.add(container);
 
     const ghost: Ghost = { id, type, object: container, caught: false };
     setModel(ghost);
-    ghosts.push(ghost);
     activeGhosts.push(ghost);
+    return ghost;
   });
 
+  // Die ersten sind sofort da, der Rest kommt nach und nach
+  const startCount = Math.min(START_GHOSTS, ghosts.length);
+  for (const ghost of ghosts.slice(0, startCount)) appear(ghost, false);
+  spawnQueue = ghosts.slice(startCount);
+  nextSpawnIn = randomBetween(...SPAWN_INTERVAL);
+
   return ghosts;
+}
+
+/**
+ * Reihenfolge, in der die Geister erscheinen:
+ * zuerst normale, dann ein normaler/flinker, danach der Rest (inkl. böse & Time) gemischt.
+ */
+function spawnOrder(mix: Record<GhostType, number>): GhostType[] {
+  const all = (Object.keys(mix) as GhostType[]).flatMap((type) => Array<GhostType>(mix[type]).fill(type));
+  const order: GhostType[] = [];
+  const takeFirst = (allowed: GhostType[]) => {
+    const candidates = all.filter((t) => allowed.includes(t));
+    if (candidates.length === 0) return;
+    const type = candidates[Math.floor(Math.random() * candidates.length)];
+    all.splice(all.indexOf(type), 1);
+    order.push(type);
+  };
+  for (let i = 0; i < START_GHOSTS; i++) takeFirst(['normal']);
+  takeFirst(['normal', 'fast']); // der erste Nachzügler ist auch noch „harmlos"
+  // Rest mischen
+  for (let i = all.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [all[i], all[j]] = [all[j], all[i]];
+  }
+  return [...order, ...all];
+}
+
+/** Lässt einen Geist erscheinen: freie Position suchen, sichtbar machen, (optional) aufwachsen. */
+function appear(ghost: Ghost, animate: boolean): void {
+  const container = ghost.object;
+  const others = activeGhosts.filter((g) => g !== ghost && g.object.visible);
+  const position = findFreePosition(spawnCenter, others, spawnOptions);
+  container.position.copy(position);
+  container.userData.baseY = position.y;
+  // Geist schaut zum Spieler (nur um die Hochachse drehen)
+  container.lookAt(spawnCenter.x, position.y, spawnCenter.z);
+  container.userData.appearTime = animate ? 0 : APPEAR_DURATION;
+  container.scale.setScalar(animate ? 0.01 : 1);
+  container.visible = true;
 }
 
 /** Sucht eine zufällige Position im Radius, die nicht zu nah an anderen Geistern liegt. */
@@ -254,6 +341,7 @@ function findFreePosition(center: THREE.Vector3, others: Ghost[], options: Spawn
 }
 
 export function removeGhosts(scene: THREE.Scene, ghosts: Ghost[]): void {
+  spawnQueue = spawnQueue.filter((g) => !ghosts.includes(g));
   for (const ghost of ghosts) {
     scene.remove(ghost.object);
     mixers.delete(ghost.object);
@@ -262,11 +350,39 @@ export function removeGhosts(scene: THREE.Scene, ghosts: Ghost[]): void {
   }
 }
 
-/** Jeden Frame aufrufen (aus main.ts): Schweben + Animationen. dt = Sekunden seit letztem Frame. */
-export function updateGhosts(dt: number): void {
+/**
+ * Jeden Frame aufrufen (aus main.ts): neue Geister erscheinen lassen, Schweben + Animationen.
+ * dt = Sekunden seit letztem Frame.
+ * @returns die Geister, die in diesem Frame neu erschienen sind (z. B. für einen Sound)
+ */
+export function updateGhosts(dt: number): Ghost[] {
+  const appeared: Ghost[] = [];
+
+  // Nächsten Geist erscheinen lassen (nur wenn nicht schon zu viele da sind)
+  if (spawnQueue.length > 0) {
+    nextSpawnIn -= dt;
+    const visibleCount = activeGhosts.filter((g) => g.object.visible && !g.caught).length;
+    if (nextSpawnIn <= 0 && visibleCount < MAX_VISIBLE) {
+      const ghost = spawnQueue.shift()!;
+      appear(ghost, true);
+      appeared.push(ghost);
+      nextSpawnIn = randomBetween(...SPAWN_INTERVAL);
+    }
+  }
+
   const t = performance.now() / 1000;
   for (const ghost of activeGhosts) {
     const obj = ghost.object;
+    if (!obj.visible) continue;
+
+    // Aufwachsen nach dem Erscheinen (mit leichtem Überschwingen)
+    if (obj.userData.appearTime < APPEAR_DURATION) {
+      obj.userData.appearTime = Math.min(APPEAR_DURATION, obj.userData.appearTime + dt);
+      const p = obj.userData.appearTime / APPEAR_DURATION;
+      const s = 1 + 2.7 * Math.pow(p - 1, 3) + 1.7 * Math.pow(p - 1, 2); // easeOutBack
+      obj.scale.setScalar(Math.max(0.01, s));
+    }
+
     obj.position.y = obj.userData.baseY + Math.sin(t * 1.5 + obj.userData.floatOffset) * FLOAT_AMOUNT;
     mixers.get(obj)?.update(dt);
 
@@ -280,6 +396,23 @@ export function updateGhosts(dt: number): void {
         aura.scale.setScalar(HEIGHT.evil * (1.6 + 0.3 * pulse));
       }
     }
+
+    // Time-Geist: Aura „tickt" ruhig im Sekundentakt, Funken kreisen
+    if (ghost.type === 'timeadd') {
+      const aura = obj.children.find((c) => c.userData.isAura) as THREE.Sprite | undefined;
+      if (aura) {
+        const tick = Math.pow(1 - (t % 1), 3); // kurzer Puls jede Sekunde
+        aura.material.opacity = 0.45 + 0.4 * tick;
+        aura.scale.setScalar(HEIGHT.timeadd * (1.5 + 0.25 * tick));
+      }
+      const sparks = obj.children.find((c) => c.userData.isSparks);
+      if (sparks) sparks.rotation.y = t * 2.5;
+    }
   }
   // TODO (später): flinke Geister / Bewegung durch den Raum (für Levels)
+  return appeared;
+}
+
+function randomBetween(min: number, max: number): number {
+  return min + Math.random() * (max - min);
 }

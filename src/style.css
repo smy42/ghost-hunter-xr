@@ -43,6 +43,43 @@ body {
   background: radial-gradient(circle at 50% 35%, #1c0b11 0%, var(--bg-dark) 65%, #000 100%);
 }
 
+/* ========== EINGANGSBILDSCHIRM („Tap to enter") ========== */
+.screen-enter {
+  z-index: 10;
+  justify-content: center;
+  background: #000;
+  cursor: pointer;
+  transition: opacity 0.9s ease;
+}
+.screen-enter.leaving { opacity: 0; }
+.enter-content {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  text-align: center;
+}
+.enter-ghost { width: 90px; opacity: 0.7; animation: ghost-float 4s ease-in-out infinite, ghost-fade 5s infinite; }
+.enter-text {
+  margin: 0;
+  font-family: 'Creepster', system-ui, cursive;
+  font-size: clamp(34px, 9vw, 56px);
+  letter-spacing: 3px;
+  color: #e8dede;
+  text-shadow: 0 0 6px #ff0022, 0 0 22px #8a0010;
+  animation: enter-pulse 2.4s ease-in-out infinite;
+}
+.enter-hint { margin: 0; font-size: 14px; color: #9a8a8e; }
+@keyframes enter-pulse {
+  0%, 100% { opacity: 0.35; }
+  50%      { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .enter-ghost, .enter-text { animation: none; }
+}
+
 /* ========== STARTSCREEN ========== */
 .screen-start { overflow: hidden; }
 .screen-start.shake { animation: shake 0.4s; }
@@ -382,6 +419,292 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .fog, .vignette, .start-ghost, .ghost-pupil, .start-title h1,
   .eyes, .screen-start .btn-primary, .btn:hover { animation: none; }
+}
+
+/* --- Fadenkreuz mit Fangbalken --- */
+.crosshair {
+  --ch-color: rgba(232, 222, 222, 0.75);
+  --progress: 0;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 84px;
+  height: 84px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  transition: transform 0.2s ease;
+  animation: ch-breathe 3s ease-in-out infinite;
+}
+.crosshair svg { width: 100%; height: 100%; overflow: visible; filter: drop-shadow(0 0 4px var(--ch-color)); }
+.crosshair svg * { transition: stroke 0.2s, fill 0.2s, opacity 0.2s; }
+.ch-track { fill: none; stroke: var(--ch-color); stroke-width: 1.5; stroke-dasharray: 3 5; opacity: 0.6; }
+.ch-progress {
+  fill: none;
+  stroke: var(--green);
+  stroke-width: 6;
+  stroke-linecap: round;
+  stroke-dasharray: 100;
+  stroke-dashoffset: calc(100 - var(--progress));
+  transform: rotate(-90deg);
+  transform-origin: 50% 50%;
+  transition: stroke-dashoffset 0.12s linear, stroke 0.2s;
+  filter: drop-shadow(0 0 6px var(--green));
+}
+.ch-ticks path { stroke: var(--ch-color); stroke-width: 2.5; stroke-linecap: round; }
+.ch-ticks { transform-origin: 50% 50%; transition: transform 0.35s ease; }
+.ch-dot { fill: #ff1a2d; }
+.ch-label {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-top: 6px;
+  white-space: nowrap;
+  font-family: 'Creepster', system-ui, cursive;
+  font-size: 18px;
+  letter-spacing: 1px;
+}
+
+/* Geist im Visier: Ring zieht sich zusammen, Striche drehen sich, grünes Leuchten */
+.crosshair.is-target { --ch-color: var(--green); transform: translate(-50%, -50%) scale(0.85); animation: none; }
+.crosshair.is-target .ch-ticks { transform: rotate(45deg); }
+.crosshair.is-target .ch-dot { fill: var(--green); }
+/* Geist im Visier, aber zu weit weg: blasser Ring, „Get closer…" */
+.crosshair.is-far { --ch-color: rgba(232, 222, 222, 0.9); }
+.crosshair.is-far .ch-label { color: #c9bcbf; animation: enter-pulse 1.6s ease-in-out infinite; }
+
+/* Böser Geist im Visier: rot + Warnung */
+.crosshair.is-evil { --ch-color: #ff2a3d; animation: ch-warn 0.5s ease-in-out infinite; }
+.crosshair.is-evil .ch-progress { stroke: #ff2a3d; filter: drop-shadow(0 0 6px #ff0022); }
+.crosshair.is-evil .ch-dot { fill: #ff2a3d; }
+/* Time-Geist im Visier: gold */
+.crosshair.is-time { --ch-color: #ffc83c; }
+.crosshair.is-time .ch-progress { stroke: #ffc83c; filter: drop-shadow(0 0 6px #ffb300); }
+.crosshair.is-time .ch-dot { fill: #ffc83c; }
+.crosshair.is-time .ch-label { color: #ffd76a; text-shadow: 0 0 8px #ffb300; }
+
+@keyframes ch-breathe {
+  0%, 100% { opacity: 0.55; }
+  50%      { opacity: 0.9; }
+  92%      { opacity: 0.85; }
+  93%      { opacity: 0.2; } /* kurzes Flackern */
+  94%      { opacity: 0.85; }
+}
+@keyframes ch-warn {
+  0%, 100% { transform: translate(-50%, -50%) scale(0.85); }
+  50%      { transform: translate(-50%, -50%) scale(0.95); }
+}
+
+/* --- Timer --- */
+.hud-timer {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  text-align: center;
+  pointer-events: none;
+}
+.hud-timer span {
+  display: inline-block;
+  font-family: 'Creepster', system-ui, cursive;
+  font-size: 40px;
+  letter-spacing: 2px;
+  color: #e8dede;
+  text-shadow: 0 0 6px rgba(255, 0, 34, 0.6), 0 0 18px rgba(0, 0, 0, 0.9);
+  animation: timer-flicker 7s infinite;
+}
+.timer-whisper {
+  display: block;
+  min-height: 1em;
+  margin-top: 4px;
+  font-family: 'Creepster', system-ui, cursive;
+  letter-spacing: 1.5px;
+  font-size: clamp(22px, 5vw, 30px);
+  color: #ff5a6a;
+  text-shadow: 0 0 6px #ff0022;
+  animation: enter-pulse 1s ease-in-out infinite;
+}
+/* ab 20 s: rot + Herzschlag-Puls */
+.hud-timer.is-low span { color: #ff3347; text-shadow: 0 0 10px #ff0022, 0 0 28px #8a0010; animation: timer-heartbeat 0.8s infinite; }
+/* ab 10 s: größer + Zittern */
+.hud-timer.is-critical span { font-size: 52px; animation: timer-heartbeat 0.5s infinite, timer-jitter 0.15s infinite; }
+/* Time-Geist gefangen: goldenes Aufblitzen */
+.hud-timer.bonus span { animation: timer-bonus 0.9s ease-out; }
+
+@keyframes timer-flicker {
+  0%, 46%, 48%, 100% { opacity: 1; }
+  47% { opacity: 0.3; }
+}
+@keyframes timer-heartbeat {
+  0%, 40%, 100% { transform: scale(1); }
+  12% { transform: scale(1.15); }
+  26% { transform: scale(1.06); }
+}
+@keyframes timer-jitter {
+  0%   { translate: 0 0; }
+  25%  { translate: -1.5px 1px; }
+  50%  { translate: 1px -1.5px; }
+  75%  { translate: -1px -1px; }
+}
+@keyframes timer-bonus {
+  0%   { color: #ffd76a; text-shadow: 0 0 14px #ffb300, 0 0 34px #ffb300; transform: scale(1.4); }
+  100% { transform: scale(1); }
+}
+
+/* Roter Rand – erst ab 20 s, wird langsam stärker (--danger 0–1). Puls liegt im ::before,
+   damit die Animation die Grund-Durchsichtigkeit nicht überschreibt. */
+.hud-danger {
+  --danger: 0;
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: calc(var(--danger) * 0.55);
+}
+.hud-danger::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at center, transparent 60%, rgba(110, 0, 12, 0.75) 100%);
+  animation: heartbeat 0.8s infinite;
+}
+
+/* --- Jumpscare --- */
+.jumpscare {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  pointer-events: auto;
+  background: #000;
+}
+.jumpscare-ghost { width: 40vmin; }
+.jumpscare-ghost .ghost-pupil { fill: #ff0022; }
+.jumpscare.go { animation: scare-flash 1.1s steps(1) forwards; }
+.jumpscare.go .jumpscare-ghost { animation: scare-lunge 1.1s cubic-bezier(0.2, 0.9, 0.3, 1.2) forwards; }
+@keyframes scare-lunge {
+  0%   { transform: scale(0.15) rotate(-8deg); opacity: 0; }
+  8%   { transform: scale(2.6) rotate(4deg); opacity: 1; }
+  14%  { transform: scale(2.4) translate(-3%, 2%) rotate(-3deg); }
+  20%  { transform: scale(2.7) translate(3%, -2%) rotate(3deg); }
+  26%  { transform: scale(2.5) translate(-2%, -3%); }
+  80%  { transform: scale(2.8); opacity: 1; }
+  100% { transform: scale(3.2); opacity: 0; }
+}
+@keyframes scare-flash {
+  0%, 100% { background: #000; }
+  6%       { background: #5a0008; }
+  10%      { background: #fff; }
+  12%      { background: #3a0005; }
+  18%      { background: #000; }
+  22%      { background: #4a0006; }
+}
+
+/* ========== GAME OVER ========== */
+.screen-lost { overflow: hidden; background: radial-gradient(circle at 50% 35%, #2a0509 0%, var(--bg-dark) 65%, #000 100%); }
+.lost-title, .screen-lost .complete-stats, .screen-lost .start-buttons { position: relative; z-index: 3; }
+.lost-title { text-align: center; }
+.lost-title h1 {
+  margin: 0;
+  font-family: 'Creepster', system-ui, cursive;
+  font-weight: 400;
+  font-size: clamp(52px, 14vw, 100px);
+  line-height: 1;
+  letter-spacing: 3px;
+  color: #ff2a3d;
+  text-shadow: 0 0 8px #ff0022, 0 0 30px #8a0010, 0 0 60px #4a0008;
+  animation: title-flicker 4s infinite, title-jitter 5s infinite;
+}
+.lost-sub { margin: 14px 0 0; color: #9a8a8e; font-style: italic; }
+.btn-blood {
+  background: var(--blood);
+  border-color: #ff2a3d;
+  color: white;
+  font-weight: 700;
+  animation: blood-glow 1.6s infinite;
+}
+@keyframes blood-glow {
+  0%, 100% { box-shadow: 0 0 8px rgba(255, 0, 34, 0.4); }
+  50%      { box-shadow: 0 0 26px rgba(255, 0, 34, 0.9); }
+}
+
+/* Flinker Geist im Visier: „TAP FAST!" blinkt hektisch */
+.crosshair.is-fast .ch-label { color: var(--green); text-shadow: 0 0 8px var(--green); animation: enter-pulse 0.35s ease-in-out infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .hud-timer span, .hud-timer.is-low span, .hud-timer.is-critical span, .hud-danger, .btn-blood, .lost-title h1 { animation: none; }
+  .jumpscare.go .jumpscare-ghost { animation-duration: 0.01s; }
+}
+
+/* ========== HUNT COMPLETE ========== */
+.screen-complete { overflow: hidden; }
+.complete-title, .complete-stats, .screen-complete .start-buttons { position: relative; z-index: 3; }
+.complete-title { text-align: center; }
+.complete-ghost { width: 70px; margin: 0 auto; opacity: 0.5; animation: ghost-float 4s ease-in-out infinite; }
+.complete-title h1 {
+  margin: 10px 0 0;
+  font-family: 'Creepster', system-ui, cursive;
+  font-weight: 400;
+  font-size: clamp(46px, 12vw, 84px);
+  line-height: 1;
+  letter-spacing: 3px;
+  color: var(--green);
+  text-shadow: 0 0 10px var(--green), 0 0 34px #0a5c34;
+  animation: title-flicker 6s infinite;
+}
+.complete-sub { margin: 12px 0 0; color: #9a8a8e; font-style: italic; }
+.complete-stats { display: flex; gap: 10px; width: 100%; max-width: 420px; }
+.complete-stats div {
+  flex: 1;
+  padding: 12px 6px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  text-align: center;
+}
+.complete-stats small { display: block; font-size: 11px; opacity: 0.75; }
+.complete-stats b { display: block; margin-top: 4px; font-size: 24px; }
+.screen-complete .btn-primary { animation: pulse-glow 2s infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .crosshair, .crosshair.is-evil, .complete-ghost, .complete-title h1 { animation: none; }
+}
+
+/* --- Popup während der Jagd (böser Geist / Time-Geist) --- */
+.hud-popup {
+  position: absolute;
+  top: 18%;
+  left: 50%;
+  transform: translate(-50%, -12px) scale(0.92);
+  width: min(86vw, 340px);
+  padding: 12px 16px;
+  border-radius: 12px;
+  border: 2px solid;
+  background: var(--panel);
+  text-align: center;
+  opacity: 0;
+  transition: opacity 0.35s ease, transform 0.35s ease;
+  pointer-events: none;
+}
+.hud-popup.visible { opacity: 1; transform: translate(-50%, 0) scale(1); }
+.hud-popup b { display: block; font-family: 'Creepster', system-ui, cursive; font-weight: 400; font-size: 28px; letter-spacing: 1px; }
+.hud-popup small { display: block; margin-top: 4px; font-size: 14px; line-height: 1.35; opacity: 0.9; }
+.hud-popup-evil { border-color: var(--blood); box-shadow: 0 0 24px rgba(179, 0, 27, 0.7); }
+.hud-popup-evil b { color: #ff3347; text-shadow: 0 0 10px #ff0022; }
+.hud-popup-evil.visible { animation: popup-shake 0.4s; }
+@keyframes popup-shake {
+  0%, 100% { transform: translate(-50%, 0); }
+  20% { transform: translate(calc(-50% - 8px), 3px); }
+  40% { transform: translate(calc(-50% + 7px), -4px); }
+  60% { transform: translate(calc(-50% - 5px), -2px); }
+  80% { transform: translate(calc(-50% + 4px), 3px); }
+}
+.hud-popup-time { border-color: #ffc83c; box-shadow: 0 0 24px rgba(255, 200, 60, 0.55); }
+.hud-popup-time b { color: #ffd76a; text-shadow: 0 0 10px #ffb300; }
+@media (prefers-reduced-motion: reduce) {
+  .hud-popup, .hud-popup.visible { transition: opacity 0.2s; transform: translate(-50%, 0); animation: none; }
 }
 
 /* --- Gruselige Atmosphäre (src/effects/atmosphere.ts) --- */
