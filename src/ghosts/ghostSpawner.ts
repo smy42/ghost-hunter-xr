@@ -11,26 +11,28 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
-import type { Ghost, GhostType } from '../types';
+import type { Ghost, GhostType, RoomSize, SpawnOptions } from '../types';
 
 // ---------- Einstellungen ----------
 
-export interface SpawnOptions {
-  /** Wie viele Geister von welchem Typ */
-  mix: Record<GhostType, number>;
-  /** Mindestabstand zum Spieler in Metern */
-  minRadius: number;
-  /** Maximaler Abstand zum Spieler in Metern */
-  maxRadius: number;
-  /** Mindestabstand der Geister untereinander in Metern */
-  minSpacing: number;
-}
+// SpawnOptions liegt jetzt in types.ts (das Level-System braucht sie auch).
+export type { SpawnOptions };
+
+/** Grund-Radius (Meter) je nach Raumgröße aus den Settings. Wird pro Level mit radiusScale multipliziert. */
+export const ROOM_RADIUS: Record<RoomSize, number> = {
+  small: 2.5,
+  medium: 5,
+  large: 8,
+};
 
 export const DEFAULT_SPAWN: SpawnOptions = {
   mix: { normal: 3, fast: 1, evil: 1, timeadd: 1 },
   minRadius: 1,
-  maxRadius: 2.5,
+  maxRadius: ROOM_RADIUS.small,
   minSpacing: 0.6,
+  behaviors: ['idle'], // Level 1: Geister bleiben stehen
+  speed: 0.6,
+  fleeDistance: 3,
 };
 
 /** Welche Modelldateien (in public/models/) zu welchem Typ gehören. Bei mehreren wird zufällig gewählt. */
@@ -270,7 +272,7 @@ export function spawnGhosts(
     container.visible = false;
     scene.add(container);
 
-    const ghost: Ghost = { id, type, object: container, caught: false };
+    const ghost: Ghost = { id, type, object: container, caught: false, behavior: 'idle', hidden: false };
     setModel(ghost);
     activeGhosts.push(ghost);
     return ghost;

@@ -208,6 +208,13 @@ export class Game {
       score: this.score,
       time: this.time,
       status: this.status,
+      // TODO (Person B): Platzhalter – echte Werte mit Level-System, UV-Akku und Pause
+      level: 1,
+      uvOn: true,
+      battery: 100,
+      paused: false,
+      // TODO (Sümi): von xr/ setzen, sobald Tracking-Verlust erkannt wird
+      trackingLost: false,
     };
   }
 }
