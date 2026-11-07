@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────
-// BEREICH: 3D-Modus (Desktop / iPhone)   →  Person B
+// BEREICH: 3D-Modus (Desktop)   →  Person B
 // ─────────────────────────────────────────────
 // Virtueller Raum + Steuerung, wenn kein AR verfügbar ist.
 // Das ist auch die Testumgebung für alle, die kein Android-Handy haben.
@@ -15,6 +15,16 @@ export class DesktopMode {
   private camera: THREE.PerspectiveCamera;
   private controls: PointerLockControls;
 
+  // UV-Taschenlampe für den 3D-Modus
+  private uvLight = new THREE.SpotLight(
+    0x9670ff,     // sanftes Violett
+    25,           // Intensität
+    12,           // Reichweite
+    Math.PI / 6,  // schmalerer Lichtkegel
+    0.4,          // weicher Rand
+    1
+  );
+
   private moveForward = false;
   private moveBackward = false;
   private moveLeft = false;
@@ -22,61 +32,33 @@ export class DesktopMode {
 
   private moveSpeed = 3;
 
-  /** Erkennt Geräte mit Touch-Bedienung ohne präzisen Mauszeiger. */
-  private readonly isTouchDevice = window.matchMedia(
-    '(hover: none) and (pointer: coarse)'
-  ).matches;
+  private readonly isTouchDevice = window.matchMedia('(pointer: coarse)').matches;
 
-  /** Virtueller Joystick für Smartphones. */
-  private joystick = document.createElement('div');
-  private joystickKnob = document.createElement('div');
+  private joystickBase: HTMLDivElement | null = null;
+  private joystickKnob: HTMLDivElement | null = null;
 
   private joystickX = 0;
   private joystickY = 0;
-  private joystickPointerId: number | null = null;
 
-  /** Touch-Steuerung für die Kamera. */
   private lookPointerId: number | null = null;
   private lastTouchX = 0;
   private lastTouchY = 0;
+
   private readonly touchSensitivity = 0.003;
+  private readonly maxPitch = Math.PI / 2 - 0.05;
 
   constructor(scene: THREE.Scene, camera: THREE.PerspectiveCamera) {
     this.scene = scene;
     this.camera = camera;
     this.controls = new PointerLockControls(this.camera, document.body);
-    // Touch-Joystick vorbereiten
-    if (this.isTouchDevice) {
-      this.joystick.style.cssText = `
-    position: fixed;
-    left: 25px;
-    bottom: 35px;
-    width: 120px;
-    height: 120px;
-    border-radius: 50%;
-    background: rgba(255, 255, 255, 0.12);
-    border: 2px solid rgba(255, 255, 255, 0.4);
-    touch-action: none;
-    z-index: 100;
-    display: none;
-  `;
+    // UV-Taschenlampe an der Kamera befestigen
+    this.uvLight.position.set(0, -0.1, 0);
 
-      this.joystickKnob.style.cssText = `
-    position: absolute;
-    left: 35px;
-    top: 35px;
-    width: 50px;
-    height: 50px;
-    border-radius: 50%;
-    background: rgba(120, 255, 190, 0.65);
-    pointer-events: none;
-  `;
+    // Licht nach vorne ausrichten
+    this.uvLight.target.position.set(0, 0, -1);
 
-      this.joystick.appendChild(this.joystickKnob);
-      document.body.appendChild(this.joystick);
-      this.joystick.style.touchAction = 'none';
-    }
-
+    this.camera.add(this.uvLight);
+    this.camera.add(this.uvLight.target);
     // Einfacher Platzhalter-Raum: Boden + Raster
     const floor = new THREE.Mesh(
       new THREE.PlaneGeometry(20, 20),
@@ -89,117 +71,12 @@ export class DesktopMode {
     // TODO (Person B): Wände / Möbel (später gern freie Assets)
   }
 
-  /** Joystick-Position aus einer Fingerbewegung berechnen. */
-  private updateJoystick(clientX: number, clientY: number): void {
-    const rect = this.joystick.getBoundingClientRect();
-
-    const centerX = rect.left + rect.width / 2;
-    const centerY = rect.top + rect.height / 2;
-
-    const dx = clientX - centerX;
-    const dy = clientY - centerY;
-
-    const maxDistance = 35;
-    const distance = Math.hypot(dx, dy);
-    const scale = distance > maxDistance ? maxDistance / distance : 1;
-
-    this.joystickX = (dx * scale) / maxDistance;
-    this.joystickY = (dy * scale) / maxDistance;
-
-    this.joystickKnob.style.transform =
-      `translate(${dx * scale}px, ${dy * scale}px)`;
-  }
-
-  /** Joystick loslassen und Bewegung stoppen. */
-  private resetJoystick(): void {
-    this.joystickX = 0;
-    this.joystickY = 0;
-    this.joystickPointerId = null;
-
-    this.joystickKnob.style.transform = 'translate(0px, 0px)';
-  }
-
-  private onJoystickDown = (event: PointerEvent): void => {
-    if (this.joystickPointerId !== null) return;
-
-    event.preventDefault();
-    this.joystickPointerId = event.pointerId;
-    this.joystick.setPointerCapture(event.pointerId);
-    this.updateJoystick(event.clientX, event.clientY);
-  };
-
-  private onJoystickMove = (event: PointerEvent): void => {
-    if (event.pointerId !== this.joystickPointerId) return;
-
-    event.preventDefault();
-    this.updateJoystick(event.clientX, event.clientY);
-  };
-
-  private onJoystickUp = (event: PointerEvent): void => {
-    if (event.pointerId !== this.joystickPointerId) return;
-
-    this.resetJoystick();
-  };
-
-  /** Finger auf der rechten Bildschirmhälfte aufsetzen. */
-  private onLookDown = (event: PointerEvent): void => {
-    if (!this.isTouchDevice || this.lookPointerId !== null) return;
-
-    // Linke Hälfte ist für den Joystick reserviert
-    if (event.clientX < window.innerWidth / 2) return;
-
-    // UI-Buttons dürfen die Kamera nicht bewegen
-    if ((event.target as Element).closest('button, .screen')) return;
-
-    event.preventDefault();
-    this.lookPointerId = event.pointerId;
-    this.lastTouchX = event.clientX;
-    this.lastTouchY = event.clientY;
-    (event.target as Element).setPointerCapture(event.pointerId);
-  };
-
-  /** Kamera durch Fingerbewegung drehen. */
-  private onLookMove = (event: PointerEvent): void => {
-    if (event.pointerId !== this.lookPointerId) return;
-
-    event.preventDefault();
-
-    const deltaX = event.clientX - this.lastTouchX;
-    const deltaY = event.clientY - this.lastTouchY;
-
-    this.lastTouchX = event.clientX;
-    this.lastTouchY = event.clientY;
-
-    // Horizontal und vertikal umsehen
-    this.camera.rotation.order = 'YXZ';
-
-    this.camera.rotation.y -= deltaX * this.touchSensitivity;
-    this.camera.rotation.x -= deltaY * this.touchSensitivity;
-
-    // Nicht über Kopf drehen
-    const maxPitch = Math.PI / 2 - 0.1;
-
-    this.camera.rotation.x = THREE.MathUtils.clamp(
-      this.camera.rotation.x,
-      -maxPitch,
-      maxPitch
-    );
-  };
-
-  /** Finger loslassen. */
-  private onLookUp = (event: PointerEvent): void => {
-    if (event.pointerId !== this.lookPointerId) return;
-
-    this.lookPointerId = null;
-  };
-
   /** Startpunkt des Spielers im 3D-Modus – hier spawnen die Geister. */
   get playerPosition(): THREE.Vector3 {
     return new THREE.Vector3(0, DESKTOP_EYE_HEIGHT, 0);
   }
 
   private onClick = (event: MouseEvent): void => {
-    // Auf Touch-Geräten kein Pointer Lock verwenden
     if (this.isTouchDevice) return;
 
     // Im Menü nicht sperren
@@ -207,23 +84,6 @@ export class DesktopMode {
 
     this.controls.lock();
   };
-
-  /** Touch-Steuerung nur während der Jagd anzeigen. */
-setHunting(active: boolean): void {
-  if (!this.isTouchDevice) return;
-
-  const visible = this.joystick.style.display === 'block';
-
-  if (visible === active) return;
-
-  this.joystick.style.display = active ? 'block' : 'none';
-
-  if (!active) {
-    this.resetJoystick();
-    this.lookPointerId = null;
-  }
-}
-
 
   /** Maus sperren (Cursor weg, Umschauen mit der Maus) – z. B. direkt bei „Start Hunt". */
   lock(): void {
@@ -235,6 +95,11 @@ setHunting(active: boolean): void {
   /** Maus wieder freigeben (z. B. wenn ein Screen wie „Hunt Complete" kommt). */
   unlock(): void {
     this.controls.unlock();
+  }
+
+  /** UV-Taschenlampe ein- oder ausschalten. */
+  setUvLight(on: boolean): void {
+    this.uvLight.visible = on;
   }
 
   private onKeyDown = (event: KeyboardEvent): void => {
@@ -271,29 +136,183 @@ setHunting(active: boolean): void {
     }
   };
 
+  private createJoystick(): void {
+    if (!this.isTouchDevice || this.joystickBase) return;
+
+    const base = document.createElement('div');
+    base.style.cssText = `
+    position: fixed;
+    left: 30px;
+    bottom: 35px;
+    width: 120px;
+    height: 120px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.15);
+    border: 2px solid rgba(255, 255, 255, 0.4);
+    z-index: 1000;
+    touch-action: none;
+    user-select: none;
+  `;
+
+    const knob = document.createElement('div');
+    knob.style.cssText = `
+    position: absolute;
+    left: 50%;
+top: 50%;
+transform: translate(-50%, -50%);
+    width: 50px;
+    height: 50px;
+    border-radius: 50%;
+    background: rgba(79, 227, 154, 0.8);
+    pointer-events: none;
+  `;
+
+    base.appendChild(knob);
+    document.body.appendChild(base);
+
+    this.joystickBase = base;
+    this.joystickKnob = knob;
+  }
+
+
+  private setupJoystick(): void {
+    const base = this.joystickBase;
+    const knob = this.joystickKnob;
+
+    if (!base || !knob) return;
+
+    let activePointerId: number | null = null;
+    const maxDistance = 35;
+
+    const resetJoystick = (): void => {
+      activePointerId = null;
+      this.joystickX = 0;
+      this.joystickY = 0;
+      knob.style.transform = 'translate(-50%, -50%)';
+    };
+
+    const updateJoystick = (event: PointerEvent): void => {
+      const rect = base.getBoundingClientRect();
+
+      const centerX = rect.left + rect.width / 2;
+      const centerY = rect.top + rect.height / 2;
+
+      let dx = event.clientX - centerX;
+      let dy = event.clientY - centerY;
+
+      const distance = Math.hypot(dx, dy);
+
+      if (distance > maxDistance) {
+        dx = (dx / distance) * maxDistance;
+        dy = (dy / distance) * maxDistance;
+      }
+
+      this.joystickX = dx / maxDistance;
+      this.joystickY = dy / maxDistance;
+
+      knob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+    };
+
+    base.addEventListener('pointerdown', (event) => {
+      if (activePointerId !== null) return;
+
+      event.preventDefault();
+      activePointerId = event.pointerId;
+      base.setPointerCapture(event.pointerId);
+      updateJoystick(event);
+    });
+
+    base.addEventListener('pointermove', (event) => {
+      if (event.pointerId !== activePointerId) return;
+
+      event.preventDefault();
+      updateJoystick(event);
+    });
+
+    base.addEventListener('pointerup', (event) => {
+      if (event.pointerId !== activePointerId) return;
+      resetJoystick();
+    });
+
+    base.addEventListener('pointercancel', (event) => {
+      if (event.pointerId !== activePointerId) return;
+      resetJoystick();
+    });
+
+    base.addEventListener('lostpointercapture', resetJoystick);
+  }
+
+
+  private onTouchLookStart = (event: PointerEvent): void => {
+    if (!this.isTouchDevice || this.lookPointerId !== null) return;
+
+    // Nur die rechte Bildschirmhälfte verwenden
+    if (event.clientX < window.innerWidth / 2) return;
+
+    // Buttons und Menüs nicht blockieren
+    if ((event.target as Element | null)?.closest('button, .screen')) return;
+
+    if (event.pointerType !== 'touch') return;
+    event.preventDefault();
+
+    this.lookPointerId = event.pointerId;
+    this.lastTouchX = event.clientX;
+    this.lastTouchY = event.clientY;
+  };
+
+  private onTouchLookMove = (event: PointerEvent): void => {
+    if (event.pointerId !== this.lookPointerId) return;
+    event.preventDefault();
+
+    const deltaX = event.clientX - this.lastTouchX;
+    const deltaY = event.clientY - this.lastTouchY;
+
+    this.lastTouchX = event.clientX;
+    this.lastTouchY = event.clientY;
+
+    // Horizontal drehen
+    this.camera.rotation.y -= deltaX * this.touchSensitivity;
+
+    // Vertikal drehen und begrenzen
+    this.camera.rotation.x = THREE.MathUtils.clamp(
+      this.camera.rotation.x - deltaY * this.touchSensitivity,
+      -this.maxPitch,
+      this.maxPitch,
+    );
+  };
+
+  private onTouchLookEnd = (event: PointerEvent): void => {
+    if (event.pointerId === this.lookPointerId) {
+      this.lookPointerId = null;
+    }
+  };
+
   enable(): void {
     this.scene.add(this.room);
+    // Kamera zur Szene hinzufügen, damit das UV-Licht funktioniert
+    this.scene.add(this.camera);
     this.scene.background = new THREE.Color(0x11141b);
     this.camera.position.copy(this.playerPosition);
     this.camera.rotation.set(0, 0, 0);
 
-    if (this.isTouchDevice) {
-      this.joystick.style.display = 'none';
-
-      this.joystick.addEventListener('pointerdown', this.onJoystickDown);
-      this.joystick.addEventListener('pointermove', this.onJoystickMove);
-      this.joystick.addEventListener('pointerup', this.onJoystickUp);
-      this.joystick.addEventListener('pointercancel', this.onJoystickUp);
-
-      document.addEventListener('pointerdown', this.onLookDown);
-      document.addEventListener('pointermove', this.onLookMove);
-      document.addEventListener('pointerup', this.onLookUp);
-      document.addEventListener('pointercancel', this.onLookUp);
-    }
-
     document.addEventListener('click', this.onClick);
     document.addEventListener('keydown', this.onKeyDown);
     document.addEventListener('keyup', this.onKeyUp);
+
+    this.createJoystick();
+    this.setupJoystick();
+
+    if (this.isTouchDevice) {
+      document.addEventListener('pointerdown', this.onTouchLookStart);
+      document.addEventListener('pointermove', this.onTouchLookMove);
+      document.addEventListener('pointerup', this.onTouchLookEnd);
+      document.addEventListener('pointercancel', this.onTouchLookEnd);
+    }
+
+    if (this.isTouchDevice) {
+      document.body.style.touchAction = 'none';
+    }
+
   }
 
   disable(): void {
@@ -305,32 +324,41 @@ setHunting(active: boolean): void {
     document.removeEventListener('keyup', this.onKeyUp);
     this.controls.unlock();
 
+    this.joystickBase?.remove();
+    this.joystickBase = null;
+    this.joystickKnob = null;
+    this.joystickX = 0;
+    this.joystickY = 0;
+
+    document.removeEventListener('pointerdown', this.onTouchLookStart);
+    document.removeEventListener('pointermove', this.onTouchLookMove);
+    document.removeEventListener('pointerup', this.onTouchLookEnd);
+    document.removeEventListener('pointercancel', this.onTouchLookEnd);
+
+    this.lookPointerId = null;
+
     if (this.isTouchDevice) {
-      this.joystick.style.display = 'none';
-
-      this.joystick.removeEventListener('pointerdown', this.onJoystickDown);
-      this.joystick.removeEventListener('pointermove', this.onJoystickMove);
-      this.joystick.removeEventListener('pointerup', this.onJoystickUp);
-      this.joystick.removeEventListener('pointercancel', this.onJoystickUp);
-
-      this.resetJoystick();
-
-      document.removeEventListener('pointerdown', this.onLookDown);
-      document.removeEventListener('pointermove', this.onLookMove);
-      document.removeEventListener('pointerup', this.onLookUp);
-      document.removeEventListener('pointercancel', this.onLookUp);
-
-      this.lookPointerId = null;
-
+      document.body.style.touchAction = '';
     }
+
   }
+
+
 
   /** Wird jeden Frame aufgerufen. dt = Sekunden seit dem letzten Frame. */
   update(dt: number): void {
+    // Desktop benötigt PointerLock, Touch nicht
     if (!this.isTouchDevice && !this.controls.isLocked) return;
 
     const distance = this.moveSpeed * dt;
 
+    if (this.isTouchDevice) {
+      this.controls.moveForward(-this.joystickY * distance);
+      this.controls.moveRight(this.joystickX * distance);
+      return;
+    }
+
+    // WASD-Steuerung für Desktop
     if (this.moveForward) {
       this.controls.moveForward(distance);
     }
@@ -346,11 +374,6 @@ setHunting(active: boolean): void {
     if (this.moveRight) {
       this.controls.moveRight(distance);
     }
-
-    // Bewegung über den virtuellen Joystick
-    if (this.isTouchDevice) {
-      this.controls.moveForward(-this.joystickY * distance);
-      this.controls.moveRight(this.joystickX * distance);
-    }
   }
+
 }

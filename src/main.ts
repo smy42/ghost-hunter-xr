@@ -246,7 +246,9 @@ renderer.setAnimationLoop(() => {
   }
   // AR: Tracking weg → Spiel einfrieren (Timer, Spawnen, Geister), bis es wieder da ist
   const trackingLost = mode === 'ar' && updateTracking(renderer, dt);
-  if (!trackingLost) game.update(dt);
+  if (!trackingLost && !game.snapshot.paused) {
+    game.update(dt);
+  }
   const state: GameSnapshot = { ...game.snapshot, trackingLost };
   const playing =
     state.status === 'playing' &&
@@ -254,6 +256,13 @@ renderer.setAnimationLoop(() => {
     !trackingLost &&
     !state.paused;
   setUvLight(state.uvOn && !TEST_UV_OFF);
+  if (mode === 'desktop') {
+    desktop.setUvLight(
+      state.status === 'playing' &&
+      state.uvOn &&
+      !TEST_UV_OFF
+    );
+  }
   if (!trackingLost && !state.paused) {
     updateStruggle(playing);
     updateSummon(dt, playing);
@@ -289,7 +298,12 @@ function updateStruggle(playing: boolean): void {
     struggleMax = 0;
   }
   struggleMax = Math.max(struggleMax, progress);
-  if (target && progress <= 0 && struggleMax >= BREAK_FREE_MIN_PROGRESS) {
+  if (
+    game.currentLevel >= 3 &&
+    target &&
+    progress <= 0 &&
+    struggleMax >= BREAK_FREE_MIN_PROGRESS
+  ) {
     struggleMax = 0;
     if (breakFree(target)) playBreakFree(target.object); // Kreischen
   }
