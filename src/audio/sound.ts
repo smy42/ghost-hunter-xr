@@ -6,6 +6,8 @@
 // - Tiefes Brummen beim bösen Geist (räumlich – wird lauter, wenn man näher kommt)
 // - Saug-, Erfolgs- und Game-Over-Sound
 //   (Saugen & Erfolg werden im Code erzeugt, weil es dafür noch keine Dateien gibt)
+// - Ritual: düstere Ambience (Loop) + tiefer Gong beim Bestätigen (Gong im Code erzeugt)
+// - Geist entkommt durch die Wand: Lachen · reißt sich los: Kreischen · schwebt heran: Stöhnen (im Code erzeugt)
 //
 // Alle Dateien liegen in public/sounds/ (Pixabay, lizenzfrei).
 // Räumlicher Sound wirkt am besten mit Kopfhörern.
@@ -20,8 +22,19 @@ const MENU_MUSIC = 'ambient';
 const GAME_MUSIC = 'ambient2';
 const RANDOM_FILES = ['random1', 'random2', 'random3', 'random4'];
 const GAMEOVER_FILE = 'gameover';
+/** Läuft, solange das AR-Ritual offen ist */
+const RITUAL_MUSIC = 'ritual-ambience';
+/** Geist entkommt durch die Wand – bei mehreren Dateien wird zufällig gewählt */
+const ESCAPE_FILES = ['creepyLaugh1', 'creepyLaugh2'];
+/** Geist reißt sich beim Fangen los */
+const BREAK_FREE_FILE = 'screech';
 
 const MUSIC_VOLUME = 0.3;
+/** Die Ritual-Datei ist viel leiser aufgenommen als ambient/ambient2 → lauter abspielen */
+const RITUAL_VOLUME = 1.6;
+/** Lachen & Kreischen sind leiser aufgenommen als random1–4 → etwas lauter abspielen */
+const ESCAPE_VOLUME = 2;
+const BREAK_FREE_VOLUME = 3;
 /** Dauer zum Ein-/Ausblenden der Musik beim Wechsel (Sekunden) */
 const MUSIC_FADE = 1.2;
 const RANDOM_VOLUME = 0.9;
@@ -33,7 +46,7 @@ const RANDOM_DISTANCE: [number, number] = [2, 4];
 // ---------- Grundgerüst ----------
 
 /** Was gerade läuft: Menü, Spiel oder nichts (z. B. nach Game Over) */
-type AudioMode = 'menu' | 'game' | 'none';
+type AudioMode = 'menu' | 'game' | 'ritual' | 'none';
 
 let listener: THREE.AudioListener;
 let scene: THREE.Scene;
@@ -75,7 +88,7 @@ export function initAudio(camera: THREE.Camera, targetScene: THREE.Scene, enable
   for (const type of unlockEvents) document.addEventListener(type, unlock);
 
   const loader = new THREE.AudioLoader();
-  for (const name of [MENU_MUSIC, GAME_MUSIC, ...RANDOM_FILES, GAMEOVER_FILE]) {
+  for (const name of [MENU_MUSIC, GAME_MUSIC, ...RANDOM_FILES, GAMEOVER_FILE, RITUAL_MUSIC, ...ESCAPE_FILES, BREAK_FREE_FILE]) {
     loader.load(
       `${import.meta.env.BASE_URL}sounds/${name}.mp3`,
       (buffer) => buffers.set(name, buffer),
@@ -92,6 +105,13 @@ export function initAudio(camera: THREE.Camera, targetScene: THREE.Scene, enable
 export function playMenuAudio(): void {
   stopGhostSounds();
   mode = 'menu';
+}
+
+/** AR-Ritual geöffnet: Spiel-Sounds aus, düstere Ritual-Ambience ein (überblendet). */
+export function startRitualAudio(): void {
+  stopGhostSounds();
+  void listener.context.resume();
+  mode = 'ritual';
 }
 
 /** Beim Start einer Runde: Spiel-Musik und Brummen beim bösen Geist. */
@@ -156,7 +176,9 @@ export function updateAudio(dt: number, camera: THREE.Camera): void {
 
 /** Sorgt dafür, dass die passende Musik läuft – mit sanftem Überblenden beim Wechsel. */
 function updateMusic(enabled: boolean): void {
-  const wanted = !enabled ? null : mode === 'menu' ? MENU_MUSIC : mode === 'game' ? GAME_MUSIC : null;
+  const wanted = !enabled
+    ? null
+    : mode === 'menu' ? MENU_MUSIC : mode === 'game' ? GAME_MUSIC : mode === 'ritual' ? RITUAL_MUSIC : null;
   if (music?.name === wanted) return;
 
   // alte Musik ausblenden
@@ -178,7 +200,7 @@ function updateMusic(enabled: boolean): void {
   audio.setLoop(true);
   const now = listener.context.currentTime;
   audio.gain.gain.setValueAtTime(0, now);
-  audio.gain.gain.linearRampToValueAtTime(MUSIC_VOLUME, now + MUSIC_FADE);
+  audio.gain.gain.linearRampToValueAtTime(wanted === RITUAL_MUSIC ? RITUAL_VOLUME : MUSIC_VOLUME, now + MUSIC_FADE);
   audio.play();
   music = { name: wanted, audio };
 }
@@ -537,6 +559,137 @@ export function playJumpscare(): void {
   noiseGain.gain.value = 0.5;
   noise.connect(noiseGain).connect(shaper);
   noise.start(now);
+}
+
+// ---------- Ritual & Geister-Reaktionen ----------
+
+/** Spielt eine Sound-Datei räumlich an einer festen Stelle (z. B. wo ein Geist verschwunden ist). */
+function playFileAt(name: string, position: THREE.Vector3, volume: number): void {
+  const buffer = buffers.get(name);
+  if (!isEnabled() || !listener || !buffer) return;
+  const source = new THREE.Object3D();
+  source.position.copy(position);
+  scene.add(source);
+  const sound = new THREE.PositionalAudio(listener);
+  sound.setBuffer(buffer).setRefDistance(1.5).setVolume(volume);
+  source.add(sound);
+  source.updateMatrixWorld(true);
+  sound.play();
+  setTimeout(() => source.removeFromParent(), (buffer.duration + 0.5) * 1000);
+}
+
+/** Geist ist durch die Wand entkommen: Lachen von der Stelle, wo er verschwunden ist. */
+export function playEscape(ghostObject: THREE.Object3D): void {
+  playFileAt(pick(ESCAPE_FILES), ghostObject.getWorldPosition(new THREE.Vector3()), ESCAPE_VOLUME);
+}
+
+/** Geist hat sich beim Fangen losgerissen: Kreischen direkt am Geist (wandert mit, während er flieht). */
+export function playBreakFree(ghostObject: THREE.Object3D): void {
+  const buffer = buffers.get(BREAK_FREE_FILE);
+  if (!isEnabled() || !listener || !buffer) return;
+  const sound = new THREE.PositionalAudio(listener);
+  sound.setBuffer(buffer).setRefDistance(1.5).setVolume(BREAK_FREE_VOLUME);
+  ghostObject.add(sound);
+  sound.play();
+  setTimeout(() => sound.removeFromParent(), (buffer.duration + 0.3) * 1000);
+}
+
+/**
+ * Ritual bestätigt: tiefer Gong mit langem Nachhall + aufsteigendes Rauschen (im Code erzeugt).
+ * Passt zum Moment, in dem sich der Kreis schließt.
+ */
+export function playRitualConfirm(): void {
+  if (!isEnabled() || !listener) return;
+  const ctx = listener.context;
+  const now = ctx.currentTime;
+  const out = listener.getInput();
+  const duration = 4;
+
+  // Gong: tiefer Grundton + unharmonische Obertöne, die unterschiedlich schnell verklingen
+  for (const [freq, vol, decay] of [[55, 0.5, 4], [110.7, 0.25, 3], [167, 0.15, 2.2], [231, 0.1, 1.6], [298, 0.06, 1.2]]) {
+    const osc = ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(freq * 1.02, now);
+    osc.frequency.exponentialRampToValueAtTime(freq, now + 0.4); // leichtes „Einschwingen"
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(vol, now + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + decay);
+    osc.connect(gain).connect(out);
+    osc.start(now);
+    osc.stop(now + decay + 0.1);
+  }
+
+  // Rauschen, das langsam anschwillt und dunkler wird → „etwas kommt"
+  const noise = ctx.createBufferSource();
+  const buffer = ctx.createBuffer(1, ctx.sampleRate * duration, ctx.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+  noise.buffer = buffer;
+  const filter = ctx.createBiquadFilter();
+  filter.type = 'lowpass';
+  filter.frequency.setValueAtTime(3000, now);
+  filter.frequency.exponentialRampToValueAtTime(200, now + duration);
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0.0001, now);
+  gain.gain.exponentialRampToValueAtTime(0.12, now + 1.2);
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+  noise.connect(filter).connect(gain).connect(out);
+  noise.start(now);
+  noise.stop(now + duration);
+}
+
+/**
+ * Geist schwebt in den letzten Sekunden auf dich zu: geisterhaftes Stöhnen,
+ * das am Geist hängt → wird lauter, je näher er kommt (im Code erzeugt, räumlich).
+ */
+export function playApproach(ghostObject: THREE.Object3D): void {
+  if (!isEnabled() || !listener || listener.context.state !== 'running') return;
+  const ctx = listener.context;
+  const now = ctx.currentTime;
+  const duration = 2.6;
+
+  // Zwei leicht verstimmte Töne, die langsam absinken, mit unruhigem Vibrato → „Huuuuuh"
+  const mix = ctx.createGain();
+  mix.gain.setValueAtTime(0.0001, now);
+  mix.gain.exponentialRampToValueAtTime(0.5, now + 0.6);
+  mix.gain.setValueAtTime(0.5, now + duration - 0.8);
+  mix.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+  const formant = ctx.createBiquadFilter(); // dumpfer, „hohler" Klang wie ein „u"
+  formant.type = 'bandpass';
+  formant.frequency.value = 450;
+  formant.Q.value = 1.5;
+  formant.connect(mix);
+
+  const vibrato = ctx.createOscillator();
+  vibrato.frequency.value = 5.5;
+  const vibratoDepth = ctx.createGain();
+  vibratoDepth.gain.value = 9;
+  vibrato.connect(vibratoDepth);
+
+  const oscillators: OscillatorNode[] = [vibrato];
+  for (const [start, end] of [[260, 170], [266, 168]]) {
+    const osc = ctx.createOscillator();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(start, now);
+    osc.frequency.exponentialRampToValueAtTime(end, now + duration);
+    vibratoDepth.connect(osc.frequency);
+    osc.connect(formant);
+    oscillators.push(osc);
+  }
+
+  const sound = new THREE.PositionalAudio(listener);
+  sound.setNodeSource(mix as unknown as AudioBufferSourceNode);
+  sound.setRefDistance(1.2);
+  ghostObject.add(sound);
+  for (const osc of oscillators) {
+    osc.start(now);
+    osc.stop(now + duration);
+  }
+  setTimeout(() => {
+    sound.disconnect();
+    sound.removeFromParent();
+  }, (duration + 0.2) * 1000);
 }
 
 /** Game-Over-Sound (Datei gameover.mp3). Stoppt auch die Hintergrund-Sounds. */

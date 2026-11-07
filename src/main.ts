@@ -17,7 +17,7 @@ import { DesktopMode } from './desktop/desktopMode';
 import { Game } from './game/game';
 import { Hud } from './ui/hud';
 import { setupAtmosphere } from './effects/atmosphere';
-import { initAudio, startRoundAudio, updateAudio, playCapture, playSuccess, playWin, playGameOver, playGhostAppear, playEvilCaught, playTimeBonus, playMenuAudio, setTension, playTick, playJumpscare } from './audio/sound';
+import { initAudio, startRoundAudio, updateAudio, playCapture, playSuccess, playWin, playGameOver, playGhostAppear, playEvilCaught, playTimeBonus, playMenuAudio, setTension, playTick, playJumpscare, startRitualAudio, playRitualConfirm, playEscape, playBreakFree, playApproach } from './audio/sound';
 import type { Ghost, GameMode, GameSnapshot, GhostBehavior, RoundStatus, SpawnOptions } from './types';
 
 const { scene, camera, renderer } = createSceneContext();
@@ -87,9 +87,11 @@ let ritualShownThisSession = false;
 function startARRound(): void {
   removeGhosts(scene, ghosts);
   ghosts = [];
+  startRitualAudio();
   showRitual(() => startRound(camera.position.clone()), {
     vibrate: hud.settings.vibration,
     short: ritualShownThisSession,
+    onConfirm: playRitualConfirm,
   });
   ritualShownThisSession = true;
 }
@@ -166,8 +168,7 @@ renderer.setAnimationLoop(() => {
     const { appeared, escaped } = updateGhosts(dt, camera.position);
     if (playing) {
       for (const ghost of appeared) playGhostAppear(ghost.object);
-      // TODO (Sounds, am Schluss): eigener Sound fürs Entkommen (Kichern / Klopfen hinter der Wand)
-      for (const ghost of escaped) playGhostAppear(ghost.object);
+      for (const ghost of escaped) playEscape(ghost.object); // Lachen hinter der Wand
     }
   }
   playSoundsForChanges(state);
@@ -198,8 +199,7 @@ function updateStruggle(playing: boolean): void {
   struggleMax = Math.max(struggleMax, progress);
   if (target && progress <= 0 && struggleMax >= BREAK_FREE_MIN_PROGRESS) {
     struggleMax = 0;
-    // TODO (Sounds, am Schluss): eigener Sound fürs Losreißen (Kreischen / Fauchen)
-    if (breakFree(target)) playGhostAppear(target.object);
+    if (breakFree(target)) playBreakFree(target.object); // Kreischen
   }
   setStruggle(target, progress / 100);
 }
@@ -217,8 +217,10 @@ function updateSummon(dt: number, playing: boolean): void {
   if (summonTimer > 0) return;
   summonTimer = SUMMON_INTERVAL;
   const summoned = summonNextGhost(camera.position);
-  // TODO (Sounds, am Schluss): eigener Sound fürs Heranschweben (z. B. leises Stöhnen, das näher kommt)
-  if (summoned) playGhostAppear(summoned.ghost.object);
+  if (!summoned) return;
+  // Auftauchen → Whoosh · Heranschweben → Stöhnen, das mit dem Geist näher kommt
+  if (summoned.kind === 'appear') playGhostAppear(summoned.ghost.object);
+  else playApproach(summoned.ghost.object);
 }
 
 /** Herzschlag & Ticken, wenn die Zeit knapp wird. */

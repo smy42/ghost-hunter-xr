@@ -6,7 +6,7 @@
 // Daraus wird der Spawn-Radius berechnet (ghosts/ghostSpawner.ts → arRadius).
 // Die Mitte = da, wo der Spieler beim Bestätigen steht → dort spawnen die Geister.
 //
-// TODO (Sounds, am Schluss): passende Ritual-Sounds (z. B. Summen beim Öffnen, Glocke/Flüstern beim Bestätigen)
+// Sounds: Ambience läuft über audio/sound.ts (startRitualAudio), Gong beim Bestätigen über options.onConfirm.
 
 import './ritual.css';
 
@@ -44,7 +44,7 @@ function saveRoomSize(size: number): void {
  */
 export function showRitual(
   onDone: (roomSize: number) => void,
-  options: { vibrate?: boolean; short?: boolean } = {},
+  options: { vibrate?: boolean; short?: boolean; onConfirm?: () => void } = {},
 ): void {
   hideRitual();
   const size = getRoomSize();
@@ -98,6 +98,7 @@ export function showRitual(
     const chosen = Number(input.value);
     saveRoomSize(chosen);
     if (options.vibrate && 'vibrate' in navigator) navigator.vibrate([80, 120, 80, 120, 300]);
+    options.onConfirm?.(); // z. B. Gong
     el.classList.add('closing'); // Text verschwindet, Kreis schließt sich, Bildschirm pulsiert rot
     setTimeout(() => {
       if (current !== el) return; // AR wurde in der Zwischenzeit beendet

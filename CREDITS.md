@@ -24,5 +24,9 @@ Alle Sounds stammen von [Pixabay Sound Effects](https://pixabay.com/de/sound-eff
 | `public/sounds/ambient.mp3`, `ambient2.mp3` | Hintergrund-Atmosphäre (Loop) |
 | `public/sounds/random1–4.mp3` | Zufällige Gruselgeräusche |
 | `public/sounds/gameover.mp3` | Game Over |
+| `public/sounds/ritual-ambience.mp3` | AR-Ritual (Loop) |
+| `public/sounds/creepyLaugh1.mp3`, `creepyLaugh2.mp3` | Geist entkommt durch die Wand |
+| `public/sounds/screech.mp3` | Geist reißt sich beim Fangen los |
 
-Saug-, Erfolgs- und Brumm-Sound (böser Geist) werden im Code erzeugt (Web Audio API).
+Saug-, Erfolgs- und Brumm-Sound (böser Geist), Whoosh, Ritual-Gong und das Stöhnen beim Heranschweben
+werden im Code erzeugt (Web Audio API).
