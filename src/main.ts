@@ -15,6 +15,7 @@ import { showRitual, hideRitual, getRoomSize } from './xr/ritual';
 import { spawnGhosts, removeGhosts, updateGhosts, createSpawnOptions, setUvLight, setStruggle, breakFree, summonNextGhost, resetSummon } from './ghosts/ghostSpawner';
 import { DesktopMode } from './desktop/desktopMode';
 import { Game } from './game/game';
+import { getLevelConfig } from './game/levels';
 import { Hud } from './ui/hud';
 import { setupAtmosphere } from './effects/atmosphere';
 import { initAudio, startRoundAudio, updateAudio, playCapture, playSuccess, playWin, playGameOver, playGhostAppear, playEvilCaught, playTimeBonus, playMenuAudio, setTension, playTick, playJumpscare, startRitualAudio, playRitualConfirm, playEscape, playBreakFree, playApproach } from './audio/sound';
@@ -35,14 +36,56 @@ const hud = new Hud({
     desktop.lock(); // Cursor weg, mit der Maus umschauen
   },
   onCapture: () => capture(),
+  onNextLevel: () => {
+    game.nextLevel();
+
+    if (mode === 'ar') {
+      startARRound();
+      return;
+    }
+
+    startRound(desktop.playerPosition);
+    desktop.lock();
+  },
   onMenu: () => playMenuAudio(),
 });
 
 /** Ein Fangversuch – egal ob Capture-Button, Linksklick oder E. */
 function capture(): void {
+  if (
+    game.snapshot.status !== 'playing' ||
+    game.snapshot.paused ||
+    !game.snapshot.uvOn
+  ) return;
+
   playCapture();
   game.capture();
 }
+
+/** Laufende Runde pausieren. */
+function pauseGame(): void {
+  game.pause();
+
+  if (mode === 'desktop') {
+    desktop.unlock();
+  }
+}
+
+/** Pausierte Runde fortsetzen. */
+function resumeGame(): void {
+  game.resume();
+
+  if (mode === 'desktop') {
+    desktop.lock();
+  }
+}
+
+/** Beim Wechsel zu einem anderen Tab automatisch pausieren. */
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && game.snapshot.status === 'playing') {
+    pauseGame();
+  }
+});
 initAudio(camera, scene, () => hud.settings.sound);
 
 // Kurze Popups, damit man die Sonder-Geister auch ohne „How to Play" versteht
@@ -64,6 +107,9 @@ game.onTimeGhostCaught = () => {
 let mode: GameMode = 'desktop';
 let ghosts: Ghost[] = [];
 
+// iPhone Camera AR – eigener Modus, unabhängig von Android WebXR
+
+
 // Desktop: Geist mit linker Maustaste oder E einfangen.
 // Funktioniert auch OHNE gesperrten Mauszeiger (z. B. Touch-Laptop, wo der Browser nicht sperrt).
 window.addEventListener('mousedown', (event) => {
@@ -77,6 +123,25 @@ window.addEventListener('mousedown', (event) => {
 window.addEventListener('keydown', (event) => {
   if (mode !== 'desktop' || event.code !== 'KeyE' || event.repeat || !hud.isHunting) return;
   capture();
+});
+
+// Tastenkürzel für Pause und UV-Lampe
+window.addEventListener('keydown', (event) => {
+  if (mode !== 'desktop' || event.repeat || !hud.isHunting) return;
+
+  if (event.code === 'KeyP') {
+    if (game.snapshot.paused) {
+      resumeGame();
+    } else if (game.snapshot.status === 'playing') {
+      pauseGame();
+    }
+  }
+
+  if (event.code === 'KeyF') {
+    if (game.snapshot.status === 'playing' && !game.snapshot.paused) {
+      game.toggleUv();
+    }
+  }
 });
 
 /**
@@ -101,9 +166,23 @@ function startRound(center: THREE.Vector3): void {
   removeGhosts(scene, ghosts);
   resetSummon();
   summonTimer = 0;
-  // TODO (Person B): radiusScale + weitere Werte aus der Level-Tabelle übergeben
-  ghosts = spawnGhosts(scene, center, createSpawnOptions(mode, currentRoomSize(), 1, testOverrides()));
-  game.start(ghosts);
+  const level = getLevelConfig(game.currentLevel);
+
+  ghosts = spawnGhosts(
+    scene,
+    center,
+    createSpawnOptions(
+      mode,
+      currentRoomSize(),
+      level.radiusScale,
+      {
+        ...level.spawn,
+        ...testOverrides(),
+      }
+    )
+  );
+
+  game.start(ghosts, game.currentLevel);
   startRoundAudio(ghosts);
 }
 
@@ -153,16 +232,38 @@ setupAR(
 // Render-Loop
 let lastStatusForCursor: RoundStatus = 'playing';
 const clock = new THREE.Clock();
+
 renderer.setAnimationLoop(() => {
   const dt = clock.getDelta();
-  if (mode === 'desktop') desktop.update(dt);
+
+  if (
+    mode === 'desktop' &&
+    hud.isHunting &&
+    game.snapshot.status === 'playing' &&
+    !game.snapshot.paused
+  ) {
+    desktop.update(dt);
+  }
   // AR: Tracking weg → Spiel einfrieren (Timer, Spawnen, Geister), bis es wieder da ist
   const trackingLost = mode === 'ar' && updateTracking(renderer, dt);
-  if (!trackingLost) game.update(dt);
+  if (!trackingLost && !game.snapshot.paused) {
+    game.update(dt);
+  }
   const state: GameSnapshot = { ...game.snapshot, trackingLost };
-  const playing = state.status === 'playing' && hud.isHunting && !trackingLost;
+  const playing =
+    state.status === 'playing' &&
+    hud.isHunting &&
+    !trackingLost &&
+    !state.paused;
   setUvLight(state.uvOn && !TEST_UV_OFF);
-  if (!trackingLost) {
+  if (mode === 'desktop') {
+    desktop.setUvLight(
+      state.status === 'playing' &&
+      state.uvOn &&
+      !TEST_UV_OFF
+    );
+  }
+  if (!trackingLost && !state.paused) {
     updateStruggle(playing);
     updateSummon(dt, playing);
     const { appeared, escaped } = updateGhosts(dt, camera.position);
@@ -197,7 +298,12 @@ function updateStruggle(playing: boolean): void {
     struggleMax = 0;
   }
   struggleMax = Math.max(struggleMax, progress);
-  if (target && progress <= 0 && struggleMax >= BREAK_FREE_MIN_PROGRESS) {
+  if (
+    game.currentLevel >= 3 &&
+    target &&
+    progress <= 0 &&
+    struggleMax >= BREAK_FREE_MIN_PROGRESS
+  ) {
     struggleMax = 0;
     if (breakFree(target)) playBreakFree(target.object); // Kreischen
   }

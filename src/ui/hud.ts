@@ -9,6 +9,7 @@ import type { GameSnapshot } from '../types';
 export interface HudCallbacks {
   /** "Start Hunt" wurde gedrückt → Runde starten (main.ts) */
   onStart: () => void;
+  onNextLevel?: () => void;
   /** Tap auf den Fang-Button (game/) */
   onCapture: () => void;
   /** Zurück ins Hauptmenü (z. B. vom „Hunt Complete"-Screen) → Menü-Musik */
@@ -419,8 +420,8 @@ export class Hud {
     label.textContent = aim.tooFar
       ? 'GET CLOSER…'
       : aim.type === 'timeadd' ? '+10 s'
-      : aim.type === 'fast' ? 'TAP FAST!'
-      : ''; // beim bösen Geist bewusst KEIN Text – nur rotes Fadenkreuz
+        : aim.type === 'fast' ? 'TAP FAST!'
+          : ''; // beim bösen Geist bewusst KEIN Text – nur rotes Fadenkreuz
   }
 
   /** true, solange die Jagd-Anzeige sichtbar ist (nicht im Menü / Endscreen) */
@@ -474,8 +475,10 @@ export class Hud {
     `;
 
     this.onAction(this.completeScreen, {
-      // TODO (Level-System): hier das nächste Level laden – vorerst einfach neue Runde
-      next: () => this.startHunt(),
+      next: () => {
+        this.showHunt();
+        this.callbacks.onNextLevel?.();
+      },
       menu: () => {
         this.callbacks.onMenu?.();
         this.showStart();

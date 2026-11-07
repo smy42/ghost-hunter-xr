@@ -4,6 +4,7 @@
 
 import * as THREE from 'three';
 import type { Ghost, GhostType, GameSnapshot, RoundStatus } from '../types';
+import { getLevelConfig } from './levels';
 
 export class Game {
   private ghosts: Ghost[] = [];
@@ -20,6 +21,19 @@ export class Game {
   private remaining = 0;
   /** Erst nach „Start Hunt" läuft die Zeit (vorher ist man im Menü) */
   private started = false;
+  /** Aktuelles Level der Runde */
+  private level = 1;
+  /** Gibt an, ob die Runde pausiert ist. */
+  private paused = false;
+  // UV-Licht und Akku
+  private uvOn = true;
+  private battery = 100;
+
+  /** Akkuverbrauch pro Sekunde */
+  private readonly batteryDrain = 10;
+
+  /** Akkuaufladung pro Sekunde */
+  private readonly batteryRecharge = 5;
 
   /** Wird aufgerufen, wenn der böse Geist gefangen wurde (freed = wie viele Geister dadurch frei kamen). */
   onEvilCaught?: (freed: number) => void;
@@ -44,21 +58,74 @@ export class Game {
     this.camera = camera;
   }
 
+  /** Pausiert die laufende Runde. */
+  pause(): void {
+    if (!this.started || this.status !== 'playing') return;
+    this.paused = true;
+  }
+
+  /** Setzt eine pausierte Runde fort. */
+  resume(): void {
+    if (!this.started || this.status !== 'playing') return;
+    this.paused = false;
+  }
+
+  /** UV-Licht ein- oder ausschalten. */
+  setUvOn(on: boolean): void {
+    if (!this.started || this.status !== 'playing' || this.paused) return;
+
+    // Leeren Akku nicht einschalten
+    if (on && this.battery <= 0) return;
+
+    this.uvOn = on;
+  }
+
+  /** UV-Licht umschalten (für den HUD-Button). */
+  toggleUv(): void {
+    this.setUvOn(!this.uvOn);
+  }
+
   /** Neue Runde starten. */
-  start(ghosts: Ghost[]): void {
+  start(ghosts: Ghost[], level = this.level): void {
+    this.level = level;
+
+    const config = getLevelConfig(this.level);
+    this.roundTime = config.roundTime;
+
     this.ghosts = ghosts;
     this.score = 0;
     this.time = 0;
     this.remaining = this.roundTime;
     this.started = true;
     this.status = 'playing';
+    this.paused = false;
+    this.uvOn = true;
+    this.battery = 100;
     this.targetedGhost = null;
     this.captureProgress = 0;
   }
 
   /** Wird jeden Frame aufgerufen. */
   update(dt: number): void {
-    if (!this.started || this.status !== 'playing') return;
+    if (!this.started || this.status !== 'playing' || this.paused) return;
+
+    // UV-Akku aktualisieren
+    if (this.uvOn) {
+      this.battery = Math.max(
+        0,
+        this.battery - this.batteryDrain * dt
+      );
+
+      // Akku leer → Licht geht aus
+      if (this.battery <= 0) {
+        this.uvOn = false;
+      }
+    } else {
+      this.battery = Math.min(
+        100,
+        this.battery + this.batteryRecharge * dt
+      );
+    }
 
     this.time += dt;
     this.remaining = Math.max(0, this.remaining - dt);
@@ -126,7 +193,12 @@ export class Game {
 
   /** Fangversuch durch Klick oder E. */
   capture(): void {
-    if (this.status !== 'playing') return;
+    if (
+      !this.started ||
+      this.status !== 'playing' ||
+      this.paused ||
+      !this.uvOn
+    ) return;
 
     const ghost = this.targetedGhost;
 
@@ -199,6 +271,36 @@ export class Game {
   get timeLeft(): number {
     return this.remaining;
   }
+  
+
+  /** Aktuelles Level auslesen. */
+  get currentLevel(): number {
+    return this.level;
+  }
+
+  /** Nächstes Level auswählen und Fortschritt speichern. */
+  nextLevel(): number {
+    if (this.status !== 'won') return this.level;
+
+    this.level += 1;
+
+    try {
+      const highest = Number(
+        localStorage.getItem('ghost-hunter-highest-level') ?? 1
+      );
+
+      if (this.level > highest) {
+        localStorage.setItem(
+          'ghost-hunter-highest-level',
+          String(this.level)
+        );
+      }
+    } catch {
+      // Falls localStorage nicht verfügbar ist
+    }
+
+    return this.level;
+  }
 
   /** Böse Geister zählen nicht zum Fangziel. */
   private get huntable(): Ghost[] {
@@ -214,10 +316,10 @@ export class Game {
       time: this.time,
       status: this.status,
       // TODO (Person B): Platzhalter – echte Werte mit Level-System, UV-Akku und Pause
-      level: 1,
-      uvOn: true,
-      battery: 100,
-      paused: false,
+      level: this.level,
+      uvOn: this.uvOn,
+      battery: this.battery,
+      paused: this.paused,
       // wird in main.ts aus xr/arSession.ts (updateTracking) überschrieben
       trackingLost: false,
     };
