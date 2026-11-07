@@ -44,16 +44,13 @@ export interface Ghost {
 
 // ---------- Spawnen & Levels ----------
 
-/** Wie viel Platz der Spieler hat (Einstellung). Bestimmt den Grund-Radius. */
-export type RoomSize = 'small' | 'medium' | 'large';
-
 /** Einstellungen zum Spawnen. Werden pro Level vom Level-System (game/) an ghosts/ übergeben. */
 export interface SpawnOptions {
   /** Wie viele Geister von welchem Typ */
   mix: Record<GhostType, number>;
   /** Mindestabstand zum Spieler in Metern */
   minRadius: number;
-  /** Maximaler Abstand zum Spieler in Metern (= Grund-Radius der Raumgröße × radiusScale des Levels) */
+  /** Maximaler Abstand zum Spieler in Metern (AR: aus der Raumgröße · 3D: Grund-Radius × radiusScale des Levels) */
   maxRadius: number;
   /** Mindestabstand der Geister untereinander in Metern */
   minSpacing: number;
@@ -73,11 +70,13 @@ export interface LevelConfig {
   /** Länge der Runde in Sekunden */
   roundTime: number;
   /**
-   * Faktor auf den Grund-Radius der Raumgröße → höhere Level = größerer Radius = schwieriger.
+   * Nur 3D-Modus: Faktor auf den Grund-Radius → höhere Level = größerer Radius = schwieriger.
    * z. B. Level 1: 1.0, Level 2: 1.2, Level 3: 1.4 …
+   * In AR bleibt der Radius gleich (der echte Raum wird nicht größer) –
+   * dort wird es über das Fangen schwieriger (mehr Taps, Geist wehrt sich / reißt sich los).
    */
   radiusScale: number;
-  /** Spawn-Werte ohne Radius (der kommt aus Raumgröße × radiusScale) */
+  /** Spawn-Werte ohne Radius (der kommt aus Raumgröße bzw. Grund-Radius × radiusScale) */
   spawn: Omit<SpawnOptions, 'minRadius' | 'maxRadius'>;
 }
 
@@ -85,13 +84,14 @@ export interface LevelConfig {
 
 /**
  * Einstellungen des Spielers (gespeichert in localStorage, gebaut in ui/).
- * TODO (Person C): hud.ts soll diesen Typ statt seines eigenen verwenden und roomSize ergänzen.
+ * TODO (Person C): hud.ts soll diesen Typ statt seines eigenen verwenden.
  */
 export interface Settings {
   sound: boolean;
   vibration: boolean;
   scary: boolean;
-  roomSize: RoomSize;
+  // Raumgröße (nur AR) ist KEINE Einstellung mehr: wird beim AR-Start-Ritual eingegeben
+  // und von xr/ritual.ts gespeichert (getRoomSize()).
 }
 
 // ---------- Spielzustand ----------

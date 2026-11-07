@@ -190,6 +190,11 @@ export class Game {
     };
   }
 
+  /** Geist, der gerade anvisiert (und gefangen) wird – nur lesen. Für „Geist wehrt sich" in ghosts/. */
+  get targetGhost(): Ghost | null {
+    return this.targetedGhost;
+  }
+
   /** Verbleibende Zeit der Runde in Sekunden (für den Timer in ui/). */
   get timeLeft(): number {
     return this.remaining;
@@ -213,7 +218,7 @@ export class Game {
       uvOn: true,
       battery: 100,
       paused: false,
-      // TODO (Sümi): von xr/ setzen, sobald Tracking-Verlust erkannt wird
+      // wird in main.ts aus xr/arSession.ts (updateTracking) überschrieben
       trackingLost: false,
     };
   }

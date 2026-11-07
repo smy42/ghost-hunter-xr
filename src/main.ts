@@ -10,14 +10,15 @@
 import * as THREE from 'three';
 import './style.css';
 import { createSceneContext } from './core/scene';
-import { setupAR } from './xr/arSession';
-import { spawnGhosts, removeGhosts, updateGhosts } from './ghosts/ghostSpawner';
+import { setupAR, updateTracking, resetTracking } from './xr/arSession';
+import { showRitual, hideRitual, getRoomSize } from './xr/ritual';
+import { spawnGhosts, removeGhosts, updateGhosts, createSpawnOptions, setUvLight, setStruggle, breakFree, summonNextGhost, resetSummon } from './ghosts/ghostSpawner';
 import { DesktopMode } from './desktop/desktopMode';
 import { Game } from './game/game';
 import { Hud } from './ui/hud';
 import { setupAtmosphere } from './effects/atmosphere';
 import { initAudio, startRoundAudio, updateAudio, playCapture, playSuccess, playWin, playGameOver, playGhostAppear, playEvilCaught, playTimeBonus, playMenuAudio, setTension, playTick, playJumpscare } from './audio/sound';
-import type { Ghost, GameMode, GameSnapshot, RoundStatus } from './types';
+import type { Ghost, GameMode, GameSnapshot, GhostBehavior, RoundStatus, SpawnOptions } from './types';
 
 const { scene, camera, renderer } = createSceneContext();
 const desktop = new DesktopMode(scene, camera);
@@ -25,8 +26,13 @@ const game = new Game(camera);
 setupAtmosphere(); // vor dem HUD, damit es darunter liegt
 const hud = new Hud({
   onStart: () => {
+    // Start Hunt / Try Again / Next Level
+    if (mode === 'ar') {
+      startARRound(); // AR: jede Runde wieder übers Ritual → Geister spawnen dort, wo man jetzt steht
+      return;
+    }
     startRound(desktop.playerPosition);
-    if (mode === 'desktop') desktop.lock(); // Cursor weg, mit der Maus umschauen
+    desktop.lock(); // Cursor weg, mit der Maus umschauen
   },
   onCapture: () => capture(),
   onMenu: () => playMenuAudio(),
@@ -73,12 +79,49 @@ window.addEventListener('keydown', (event) => {
   capture();
 });
 
+/**
+ * AR: Runde übers Ritual starten. Beim ersten Mal das volle Ritual, danach die kurze Version.
+ * Bis zum Bestätigen sind keine Geister da (die alten werden gleich entfernt).
+ */
+let ritualShownThisSession = false;
+function startARRound(): void {
+  removeGhosts(scene, ghosts);
+  ghosts = [];
+  showRitual(() => startRound(camera.position.clone()), {
+    vibrate: hud.settings.vibration,
+    short: ritualShownThisSession,
+  });
+  ritualShownThisSession = true;
+}
+
 /** Neue Runde starten: alte Geister weg, neue um den Spieler spawnen. */
 function startRound(center: THREE.Vector3): void {
   removeGhosts(scene, ghosts);
-  ghosts = spawnGhosts(scene, center);
+  resetSummon();
+  summonTimer = 0;
+  // TODO (Person B): radiusScale + weitere Werte aus der Level-Tabelle übergeben
+  ghosts = spawnGhosts(scene, center, createSpawnOptions(mode, currentRoomSize(), 1, testOverrides()));
   game.start(ghosts);
   startRoundAudio(ghosts);
+}
+
+/**
+ * Nur zum Testen, bis das Level-System da ist: Verhalten über die URL einschalten, z. B.
+ *   https://…:5173/?behaviors=wander,flee,teleport
+ * Ohne Parameter: Geister stehen still (Level 1).
+ */
+function testOverrides(): Partial<SpawnOptions> {
+  const param = new URLSearchParams(location.search).get('behaviors');
+  if (!param) return {};
+  return { behaviors: param.split(',').map((b) => b.trim()) as GhostBehavior[] };
+}
+
+/** Nur zum Testen, bis Person B das UV-Licht gebaut hat: ?uv=off → Geister so, als wäre das Licht aus */
+const TEST_UV_OFF = new URLSearchParams(location.search).get('uv') === 'off';
+
+/** Nur AR: Raumgröße in Metern (kürzere Seite) – eingegeben beim AR-Start-Ritual. */
+function currentRoomSize(): number {
+  return getRoomSize();
 }
 
 // Standard: 3D-Modus
@@ -91,9 +134,14 @@ setupAR(
     mode = 'ar';
     desktop.disable();
     hud.showHunt(); // Startscreen ausblenden, damit man in AR die Kamera sieht
-    startRound(new THREE.Vector3(0, 0, 0)); // AR: Startposition des Handys = Nullpunkt
+    // Erst das Ritual: Spieler stellt sich in die Mitte und gibt die Raumgröße ein.
+    // Die Geister spawnen um die Stelle, an der er beim Bestätigen steht.
+    startARRound();
   },
   () => {
+    hideRitual();
+    ritualShownThisSession = false; // nächste AR-Session: wieder das volle Ritual
+    resetTracking();
     mode = 'desktop';
     desktop.enable();
     startRound(desktop.playerPosition);
@@ -106,10 +154,22 @@ const clock = new THREE.Clock();
 renderer.setAnimationLoop(() => {
   const dt = clock.getDelta();
   if (mode === 'desktop') desktop.update(dt);
-  game.update(dt);
-  const state = game.snapshot;
-  const playing = state.status === 'playing' && hud.isHunting;
-  for (const ghost of updateGhosts(dt)) if (playing) playGhostAppear(ghost.object);
+  // AR: Tracking weg → Spiel einfrieren (Timer, Spawnen, Geister), bis es wieder da ist
+  const trackingLost = mode === 'ar' && updateTracking(renderer, dt);
+  if (!trackingLost) game.update(dt);
+  const state: GameSnapshot = { ...game.snapshot, trackingLost };
+  const playing = state.status === 'playing' && hud.isHunting && !trackingLost;
+  setUvLight(state.uvOn && !TEST_UV_OFF);
+  if (!trackingLost) {
+    updateStruggle(playing);
+    updateSummon(dt, playing);
+    const { appeared, escaped } = updateGhosts(dt, camera.position);
+    if (playing) {
+      for (const ghost of appeared) playGhostAppear(ghost.object);
+      // TODO (Sounds, am Schluss): eigener Sound fürs Entkommen (Kichern / Klopfen hinter der Wand)
+      for (const ghost of escaped) playGhostAppear(ghost.object);
+    }
+  }
   playSoundsForChanges(state);
   updateTimerEffects(playing);
   updateAudio(dt, camera);
@@ -119,6 +179,47 @@ renderer.setAnimationLoop(() => {
   hud.updateAim(game.aim);
   renderer.render(scene, camera);
 });
+
+/**
+ * Geist wehrt sich beim Fangen: zittert, solange man tippt.
+ * Fällt der Fangbalken wieder auf 0 (Spieler zu langsam), reißt er sich los und flieht.
+ */
+/** Ab so viel Fortschritt (0–100) zählt ein abgebrochener Fangversuch als „losgerissen" */
+const BREAK_FREE_MIN_PROGRESS = 25;
+let struggleGhost: Ghost | null = null;
+let struggleMax = 0;
+function updateStruggle(playing: boolean): void {
+  const target = playing ? game.targetGhost : null;
+  const progress = target ? game.aim.progress : 0;
+  if (target !== struggleGhost) {
+    struggleGhost = target; // anderer Geist / weggeschaut → kein Losreißen
+    struggleMax = 0;
+  }
+  struggleMax = Math.max(struggleMax, progress);
+  if (target && progress <= 0 && struggleMax >= BREAK_FREE_MIN_PROGRESS) {
+    struggleMax = 0;
+    // TODO (Sounds, am Schluss): eigener Sound fürs Losreißen (Kreischen / Fauchen)
+    if (breakFree(target)) playGhostAppear(target.object);
+  }
+  setStruggle(target, progress / 100);
+}
+
+/**
+ * Letzte Sekunden: weit entfernte Geister kommen nacheinander zu dir
+ * (abwechselnd flackernd auftauchen / heranschweben) – damit keiner unerreichbar hinter einer Wand bleibt.
+ */
+const SUMMON_FROM = 10; // ab so vielen Sekunden Restzeit
+const SUMMON_INTERVAL = 2; // alle so vielen Sekunden einer
+let summonTimer = 0;
+function updateSummon(dt: number, playing: boolean): void {
+  if (!playing || game.timeLeft > SUMMON_FROM) return;
+  summonTimer -= dt;
+  if (summonTimer > 0) return;
+  summonTimer = SUMMON_INTERVAL;
+  const summoned = summonNextGhost(camera.position);
+  // TODO (Sounds, am Schluss): eigener Sound fürs Heranschweben (z. B. leises Stöhnen, das näher kommt)
+  if (summoned) playGhostAppear(summoned.ghost.object);
+}
 
 /** Herzschlag & Ticken, wenn die Zeit knapp wird. */
 let lastSecond = -1;

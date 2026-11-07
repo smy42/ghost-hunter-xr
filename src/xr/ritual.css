@@ -1,0 +1,159 @@
+/* ===== AR-Start-Ritual (xr/ritual.ts, Sümi) ===== */
+
+/* Halb durchsichtig: in AR sieht man den echten Raum dahinter */
+.ritual {
+  z-index: 8;
+  justify-content: center;
+  gap: 24px;
+  overflow: hidden;
+  /* Fog + roter Herzschlag-Rand (.fog, .vignette) kommen aus style.css – wie am Startscreen */
+  background: radial-gradient(circle at 50% 45%, rgba(28, 11, 17, 0.45) 0%, rgba(7, 5, 10, 0.8) 70%, #000 100%);
+  text-align: center;
+  transition: opacity 0.6s ease;
+  animation: ritual-in 1.2s ease-out;
+}
+.ritual.leaving { opacity: 0; }
+@keyframes ritual-in { from { opacity: 0; } }
+
+.ritual-content {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  max-width: 380px;
+  transition: opacity 0.8s ease, filter 0.8s ease;
+}
+
+.ritual-title {
+  margin: 0 0 10px;
+  font-family: 'Creepster', system-ui, cursive;
+  font-weight: 400;
+  font-size: clamp(48px, 13vw, 84px);
+  line-height: 1;
+  letter-spacing: 3px;
+  color: #e8dede;
+  text-shadow: 0 0 6px #ff0022, 0 0 22px #8a0010, 0 0 45px #4a0008; /* wie der Startscreen-Titel */
+  animation: title-flicker 6s infinite, title-jitter 7s infinite;    /* Keyframes aus style.css */
+}
+
+/* Zeilen erscheinen nacheinander – in der Blut-Schrift wie das Flüstern am Timer */
+.ritual-line {
+  margin: 0;
+  font-family: 'Creepster', system-ui, cursive;
+  font-size: clamp(20px, 5.4vw, 28px);
+  letter-spacing: 1.5px;
+  color: #e8dede;
+  text-shadow: 0 0 6px rgba(255, 0, 34, 0.6), 0 0 18px rgba(0, 0, 0, 0.9);
+  opacity: 0;
+  animation: ritual-line-in 1.4s ease forwards;
+}
+.ritual-line:nth-of-type(1) { animation-delay: 0.4s; }
+.ritual-line:nth-of-type(2) { animation-delay: 1.4s; }
+.ritual-line:nth-of-type(3) { animation-delay: 2.6s; }
+.ritual-warning {
+  margin-top: 6px;
+  font-size: clamp(18px, 5vw, 22px);
+  color: #ff5a6a;
+  text-shadow: 0 0 6px #ff0022;
+}
+@keyframes ritual-line-in {
+  from { opacity: 0; transform: translateY(6px); filter: blur(3px); }
+  to   { opacity: 1; transform: none; filter: none; }
+}
+
+.ritual-size {
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  font-size: 15px;
+  font-style: italic;          /* wie das Flüstern am Startscreen */
+  letter-spacing: 1px;
+  color: #c99;
+  text-shadow: 0 0 8px #600;
+  opacity: 0;
+  animation: ritual-line-in 1s ease 3.4s forwards;
+}
+.ritual-value {
+  font-family: 'Creepster', system-ui, cursive;
+  font-size: 44px;
+  letter-spacing: 2px;
+  font-style: normal;
+  color: #e8dede;
+  text-shadow: 0 0 6px rgba(255, 0, 34, 0.6), 0 0 18px rgba(0, 0, 0, 0.9); /* wie der Timer */
+}
+.ritual-size small { color: #8d7d82; font-size: 12px; }
+.ritual-size input {
+  width: 100%;
+  accent-color: var(--blood, #b3001b);
+  pointer-events: auto;
+}
+
+.ritual-begin {
+  margin-top: 10px;
+  width: min(280px, 100%);
+  background: var(--blood, #b3001b) !important;
+  border-color: #ff2a44 !important;
+  color: #e8dede !important;
+  font-family: 'Creepster', system-ui, cursive;
+  font-size: 24px;
+  letter-spacing: 2px;
+  opacity: 0;
+  animation: ritual-line-in 1s ease 3.8s forwards, ritual-glow 2.4s ease-in-out 4.8s infinite;
+}
+@keyframes ritual-glow {
+  0%, 100% { box-shadow: 0 0 6px rgba(255, 42, 68, 0.3); }
+  50%      { box-shadow: 0 0 22px rgba(255, 42, 68, 0.8); }
+}
+
+/* Kreis hinter dem Text – dreht sich langsam */
+.ritual-circle {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  z-index: 2;
+}
+.ritual-circle svg {
+  width: min(92vw, 560px);
+  animation: ritual-spin 40s linear infinite;
+}
+.ritual-ring {
+  fill: none;
+  stroke: rgba(179, 0, 27, 0.35);
+  stroke-width: 0.8;
+  stroke-dasharray: 2 3;
+  transition: stroke 0.6s ease, stroke-dasharray 1.4s ease, stroke-width 1.4s ease;
+}
+.ritual-ring-inner { stroke-dasharray: 1 4; }
+@keyframes ritual-spin { to { transform: rotate(360deg); } }
+
+/* --- Bestätigt: Text verschwindet, Kreis schließt sich, Bildschirm pulsiert rot --- */
+.ritual.closing { animation: ritual-pulse 1.8s ease-in; }
+.ritual.closing .ritual-content { opacity: 0; filter: blur(6px); pointer-events: none; }
+.ritual.closing .ritual-ring {
+  stroke: #ff2a44;
+  stroke-width: 2;
+  stroke-dasharray: 100 0;
+}
+.ritual.closing .ritual-circle svg { animation: ritual-spin 3s linear infinite; }
+@keyframes ritual-pulse {
+  0%   { background-color: transparent; }
+  60%  { box-shadow: inset 0 0 120px 40px rgba(179, 0, 27, 0.7); }
+  100% { box-shadow: inset 0 0 200px 80px rgba(0, 0, 0, 1); }
+}
+
+/* --- Kurze Version (ab der 2. Runde): alles kommt schneller --- */
+.ritual-short .ritual-line:nth-of-type(1) { animation-delay: 0.2s; }
+.ritual-short .ritual-line:nth-of-type(2) { animation-delay: 0.6s; }
+.ritual-short .ritual-size { animation-delay: 0.8s; }
+.ritual-short .ritual-begin { animation-delay: 1s, 2s; }
+
+@media (prefers-reduced-motion: reduce) {
+  .ritual, .ritual-line, .ritual-size, .ritual-begin, .ritual-circle svg { animation: none; opacity: 1; }
+}

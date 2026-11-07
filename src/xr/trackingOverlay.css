@@ -1,0 +1,53 @@
+/* ===== Hinweis bei Tracking-Verlust (xr/trackingOverlay.ts, Sümi) ===== */
+.tracking-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 9; /* über dem Ritual */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  pointer-events: none;
+  text-align: center;
+  background: radial-gradient(ellipse at center, rgba(0, 0, 0, 0.35) 30%, rgba(40, 0, 6, 0.8) 100%);
+  opacity: 0;
+  transition: opacity 0.4s ease;
+}
+.tracking-overlay.visible { opacity: 1; }
+
+.tracking-phone svg {
+  width: 44px;
+  fill: none;
+  stroke: #e8dede;
+  stroke-width: 2.5;
+  filter: drop-shadow(0 0 6px #ff0022);
+  animation: tracking-sway 2.4s ease-in-out infinite;
+}
+.tracking-phone circle { fill: #e8dede; stroke: none; }
+@keyframes tracking-sway {
+  0%, 100% { transform: translateX(-26px) rotate(-8deg); }
+  50%      { transform: translateX(26px) rotate(8deg); }
+}
+
+/* Blut-Schrift wie Timer & Ritual */
+.tracking-text {
+  margin: 0;
+  font-family: 'Creepster', system-ui, cursive;
+  font-size: clamp(30px, 8vw, 44px);
+  letter-spacing: 2px;
+  color: #e8dede;
+  text-shadow: 0 0 6px #ff0022, 0 0 22px #8a0010;
+  animation: enter-pulse 2.4s ease-in-out infinite; /* Keyframes aus style.css */
+}
+.tracking-whisper {
+  margin: 0;
+  font-style: italic;
+  letter-spacing: 2px;
+  color: #c99;
+  text-shadow: 0 0 8px #600;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tracking-phone svg, .tracking-text { animation: none; }
+}
