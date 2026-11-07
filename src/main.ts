@@ -288,6 +288,7 @@ renderer.setAnimationLoop(() => {
   lastStatusForCursor = state.status;
   hud.update(state);
   hud.updateAim(game.aim);
+  if (hud.isHunting) hud.updateRadar(ghosts, camera); // Radar & Pfeil zum nächsten Geist
   renderer.render(scene, camera);
 });
 

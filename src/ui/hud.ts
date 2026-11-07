@@ -4,7 +4,14 @@
 // Alles liegt im <div id="ui">. Dieses Element bleibt auch in AR sichtbar (dom-overlay).
 // Also: Anzeigen IMMER in #ui einhängen, nicht direkt in <body>.
 
-import type { GameSnapshot, Settings } from '../types';
+import { Vector3 } from 'three';
+import type { Camera } from 'three';
+import type { Ghost, GameSnapshot, Settings } from '../types';
+
+/** Reichweite des Radars in Metern – weiter entfernte Geister kleben am Rand */
+const RADAR_RANGE = 8;
+/** Abstand des Pfeils zum Bildschirmrand (px): seitlich, oben (unter Timer & Co.), unten (über den Buttons) */
+const ARROW_MARGIN = { side: 44, top: 110, bottom: 150 };
 
 export interface HudCallbacks {
   /** "Start Hunt" wurde gedrückt → Runde starten (main.ts) */
@@ -102,6 +109,18 @@ export class Hud {
   /** Wohin der ←-Button in den Settings führt */
   private settingsReturn: 'start' | 'pause' = 'start';
 
+  // Radar & Pfeil zum nächsten Geist
+  private radar = document.createElement('div');
+  private radarDots = new Map<number, HTMLElement>();
+  private arrow = document.createElement('div');
+  private arrowIcon!: SVGElement;
+  private arrowDist!: HTMLElement;
+  private lastArrowText = '';
+  private camPos = new Vector3();
+  private camDir = new Vector3();
+  private ghostPos = new Vector3();
+  private projected = new Vector3();
+
   constructor(callbacks: HudCallbacks) {
     this.callbacks = callbacks;
     this.buildStartScreen();
@@ -131,7 +150,6 @@ export class Hud {
     this.showStart();
     this.buildEnterGate();
 
-    // TODO (Person C): Pfeil mit Distanz / Radar zum nächsten Geist
   }
 
   /** Aktuelle Einstellungen (z. B. hud.settings.sound) */
@@ -391,6 +409,7 @@ export class Hud {
     this.danger.className = 'hud-danger';
 
     this.buildPauseUvLevel();
+    this.buildRadar();
 
     this.huntLayer.append(
       this.danger,
@@ -398,6 +417,8 @@ export class Hud {
       this.timer,
       this.ghostsLeft,
       this.levelBadge,
+      this.radar,
+      this.arrow,
       this.pauseButton,
       this.uvButton,
       this.captureButton,
@@ -478,6 +499,154 @@ export class Hud {
     this.levelIntro.classList.add('show');
     window.clearTimeout(this.levelIntroTimer);
     this.levelIntroTimer = window.setTimeout(() => (this.levelIntro.hidden = true), 3000);
+  }
+
+  // ---------- Radar & Pfeil zum nächsten Geist ----------
+
+  private buildRadar(): void {
+    // Mini-Radar oben rechts: Mitte = du, oben = Blickrichtung
+    this.radar.className = 'hud-radar';
+    this.radar.setAttribute('aria-hidden', 'true');
+    this.radar.innerHTML = `
+      <div class="radar-sweep"></div>
+      <div class="radar-ring"></div>
+      <div class="radar-cone"></div>
+      <div class="radar-me"></div>
+    `;
+
+    // Pfeil am Bildschirmrand, wenn der nächste Geist nicht im Bild ist
+    this.arrow.className = 'hud-arrow';
+    this.arrow.hidden = true;
+    this.arrow.innerHTML = `
+      <svg class="arrow-icon" viewBox="0 0 40 40" aria-hidden="true">
+        <path d="M6 7 L36 20 L6 33 L14 20 Z"/>
+      </svg>
+      <span class="arrow-dist"></span>
+    `;
+    this.arrowIcon = this.arrow.querySelector('svg')!;
+    this.arrowDist = this.arrow.querySelector('.arrow-dist')!;
+  }
+
+  /**
+   * Radar & Pfeil aktualisieren (jeden Frame aus main.ts, solange gejagt wird).
+   * Zeigt alle nicht gefangenen Geister (versteckte blass, böser rot, Time-Geist gold).
+   * Der Pfeil zeigt zum nächsten Geist, den man fangen soll (nie zum bösen).
+   */
+  updateRadar(ghosts: Ghost[], camera: Camera): void {
+    camera.getWorldPosition(this.camPos);
+    camera.getWorldDirection(this.camDir);
+    // Blickrichtung nur waagrecht (Radar ist eine Draufsicht)
+    const flat = Math.hypot(this.camDir.x, this.camDir.z) || 1;
+    const fx = this.camDir.x / flat;
+    const fz = this.camDir.z / flat;
+    const radius = (this.radar.clientWidth || 96) / 2 - 6;
+
+    const seen = new Set<number>();
+    let target: Ghost | null = null;
+    let targetDist = Infinity;
+
+    for (const ghost of ghosts) {
+      // gefangen oder noch nicht erschienen → nicht anzeigen
+      if (ghost.caught || !(ghost.object.visible || ghost.hidden)) continue;
+      seen.add(ghost.id);
+
+      ghost.object.getWorldPosition(this.ghostPos);
+      const dx = this.ghostPos.x - this.camPos.x;
+      const dz = this.ghostPos.z - this.camPos.z;
+      const dist = Math.hypot(dx, dz);
+
+      // In die Sicht des Spielers drehen: rechts = +x, vorne = oben
+      const right = -dx * fz + dz * fx;
+      const ahead = dx * fx + dz * fz;
+      const scale = (Math.min(dist, RADAR_RANGE) / RADAR_RANGE) * radius / (dist || 1);
+
+      let dot = this.radarDots.get(ghost.id);
+      if (!dot) {
+        dot = document.createElement('i');
+        this.radar.append(dot);
+        this.radarDots.set(ghost.id, dot);
+      }
+      const cls = `radar-dot type-${ghost.type}${ghost.hidden ? ' is-hidden' : ''}${dist > RADAR_RANGE ? ' is-edge' : ''}`;
+      if (dot.className !== cls) dot.className = cls;
+      dot.style.transform = `translate(${(right * scale).toFixed(1)}px, ${(-ahead * scale).toFixed(1)}px)`;
+
+      // Ziel für den Pfeil: sichtbare Geister vor versteckten, dann der nächste
+      if (ghost.type === 'evil') continue;
+      const better =
+        !target ||
+        (target.hidden && !ghost.hidden) ||
+        (target.hidden === ghost.hidden && dist < targetDist);
+      if (better) {
+        target = ghost;
+        targetDist = dist;
+      }
+    }
+
+    // Punkte von gefangenen / entfernten Geistern wegräumen
+    for (const [id, dot] of this.radarDots) {
+      if (!seen.has(id)) {
+        dot.remove();
+        this.radarDots.delete(id);
+      }
+    }
+
+    this.updateArrow(target, targetDist, camera);
+  }
+
+  private updateArrow(target: Ghost | null, dist: number, camera: Camera): void {
+    if (!target) {
+      this.arrow.hidden = true;
+      return;
+    }
+    target.object.getWorldPosition(this.ghostPos);
+    this.projected.copy(this.ghostPos).project(camera);
+    const local = camera.worldToLocal(this.ghostPos); // Kamera-Sicht: x rechts, y oben, z nach hinten
+    const inFront = local.z < 0;
+
+    // Geist ist gut im Bild → kein Pfeil nötig
+    if (inFront && Math.abs(this.projected.x) < 0.85 && Math.abs(this.projected.y) < 0.85) {
+      this.arrow.hidden = true;
+      return;
+    }
+
+    const halfW = window.innerWidth / 2;
+    const halfH = window.innerHeight / 2;
+    let sx: number;
+    let sy: number;
+    let behind = false;
+    if (inFront) {
+      // Richtung auf dem Bildschirm (Bildschirm-y zeigt nach unten)
+      sx = this.projected.x * halfW;
+      sy = -this.projected.y * halfH;
+    } else {
+      sx = local.x;
+      sy = -local.y * 0.3; // hinter dir zählt vor allem links/rechts
+      // fast genau hinter dir → Pfeil nach unten: „umdrehen"
+      if (Math.abs(local.x) < Math.abs(local.z) * 0.35) {
+        sx = 0;
+        sy = 1;
+        behind = true;
+      }
+    }
+
+    // An den Bildschirmrand schieben (mit Abstand zu Timer & Buttons)
+    const limits = [
+      sx !== 0 ? (halfW - ARROW_MARGIN.side) / Math.abs(sx) : Infinity,
+      sy < 0 ? (halfH - ARROW_MARGIN.top) / -sy : sy > 0 ? (halfH - ARROW_MARGIN.bottom) / sy : Infinity,
+    ];
+    const k = Math.min(...limits);
+    this.arrow.style.left = `${(halfW + sx * k).toFixed(0)}px`;
+    this.arrow.style.top = `${(halfH + sy * k).toFixed(0)}px`;
+    this.arrowIcon.style.transform = `rotate(${((Math.atan2(sy, sx) * 180) / Math.PI).toFixed(1)}deg)`;
+
+    const text = `${dist.toFixed(1)} m${behind ? ' · behind you' : ''}`;
+    if (text !== this.lastArrowText) {
+      this.arrowDist.textContent = text;
+      this.lastArrowText = text;
+    }
+    const cls = `hud-arrow type-${target.type}${target.hidden ? ' is-hidden' : ''}${behind ? ' is-behind' : ''}`;
+    if (this.arrow.className !== cls) this.arrow.className = cls;
+    this.arrow.hidden = false;
   }
 
   /** UV-Button & Akkubalken. Unter 20 % rot und blinkend. */
