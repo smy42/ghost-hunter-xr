@@ -1215,3 +1215,48 @@ canvas {
     font-size: 28px;
   }
 }
+
+
+/* Game-Over-Screen auf iPhone im Querformat */
+@media (max-height: 500px) and (orientation: landscape) {
+  .screen-lost {
+    box-sizing: border-box;
+    height: 100dvh;
+    min-height: 0;
+    padding: 8px 16px;
+    overflow-y: auto;
+    justify-content: flex-start;
+    gap: 8px;
+  }
+
+  .screen-lost .lost-title {
+    margin: 0;
+  }
+
+  .screen-lost .lost-title h1 {
+    font-size: clamp(24px, 6vh, 40px);
+    line-height: 1;
+    margin: 0;
+  }
+
+  .screen-lost .lost-sub {
+    font-size: 12px;
+    margin: 4px 0;
+  }
+
+  .screen-lost .complete-stats {
+    margin: 0;
+    padding: 0;
+  }
+
+  .screen-lost .start-buttons {
+    position: relative;
+    margin: 0 auto 8px;
+    flex-shrink: 0;
+  }
+
+  .screen-lost .btn {
+    padding: 8px 16px;
+    font-size: 13px;
+  }
+}

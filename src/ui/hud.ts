@@ -831,6 +831,7 @@ export class Hud {
     set('score', String(state.score));
     this.lostScreen.querySelector<HTMLElement>('[data-action="retry"]')!.innerHTML =
       `↻&nbsp; Try Again – Level ${state.level}`;
+    console.log('GAME OVER SCREEN WIRD ANGEZEIGT');
     this.show(this.lostScreen);
   }
 
@@ -869,9 +870,24 @@ export class Hud {
 
   // ---------- Screens wechseln (immer nur EIN Screen sichtbar) ----------
 
+
   private show(screen: HTMLElement): void {
-    for (const s of this.screens) s.hidden = s !== screen;
+    for (const s of this.screens) {
+      s.hidden = s !== screen;
+    }
+
+    // Sicherstellen, dass der Endscreen auf mobilen Geräten
+    // nicht hinter dem HUD oder der 3D-Szene liegt.
+    if (screen === this.lostScreen || screen === this.completeScreen) {
+      this.huntLayer.hidden = true;
+
+      screen.style.position = 'fixed';
+      screen.style.inset = '0';
+      screen.style.zIndex = '99999';
+      screen.style.display = 'flex';
+    }
   }
+
 
   showStart(): void {
     this.show(this.startScreen);
@@ -943,7 +959,10 @@ export class Hud {
     if (state.status !== this.lastStatus) {
       window.clearTimeout(this.completeTimer);
       if (state.status === 'won') this.completeTimer = window.setTimeout(() => this.showComplete(state), 1300);
-      if (state.status === 'lost') this.playJumpscare(() => this.showLost(state));
+      if (state.status === 'lost') {
+        console.log('LOST erkannt – zeige Endscreen sofort');
+        this.showLost(state);
+      }
       this.lastStatus = state.status;
     }
   }

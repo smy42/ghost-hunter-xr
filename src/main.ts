@@ -292,6 +292,10 @@ renderer.setAnimationLoop(() => {
     game.update(dt);
   }
   const state: GameSnapshot = { ...game.snapshot, trackingLost };
+  // Game Over und Sieg sofort an das HUD melden
+  if (state.status === 'lost' || state.status === 'won') {
+    hud.update(state);
+  }
   const playing =
     state.status === 'playing' &&
     hud.isHunting &&
