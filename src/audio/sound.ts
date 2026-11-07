@@ -98,6 +98,20 @@ export function initAudio(camera: THREE.Camera, targetScene: THREE.Scene, enable
   }
 }
 
+/** Alle Spielsounds während einer Pause anhalten. */
+export function pauseAudio(): void {
+  if (!listener) return;
+
+  void listener.context.suspend();
+}
+
+/** Spielsounds nach einer Pause fortsetzen. */
+export function resumeAudio(): void {
+  if (!listener) return;
+
+  void listener.context.resume();
+}
+
 // ---------- Menü / Runde ----------
 
 /** Zurück ins Menü (z. B. „Main Menu" nach Hunt Complete / Game Over): Menü-Musik, Spiel-Sounds aus. */

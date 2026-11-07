@@ -1,10 +1,20 @@
 @import url('https://fonts.googleapis.com/css2?family=Creepster&display=swap');
 
-body {
+
+html, body {
   margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
   overflow: hidden;
+  background: #07050a;
   font-family: system-ui, sans-serif;
 }
+
+canvas {
+  display: block;
+}
+
 
 /* Container für alle Anzeigen – bleibt in AR sichtbar (dom-overlay) */
 #ui {
@@ -1097,4 +1107,111 @@ body {
 .hud-score b { display: inline-block; }
 @media (prefers-reduced-motion: reduce) {
   .hud-score.bump b { animation: none; }
+}
+
+
+/* ===== Querformat für mobilen 3D-Modus ===== */
+
+#rotate-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  height: 100dvh;
+  z-index: 99999;
+  background: #07050a;
+  color: white;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 24px;
+  box-sizing: border-box;
+}
+
+.rotate-content {
+  max-width: 320px;
+}
+
+.rotate-icon {
+  font-size: 72px;
+  margin-bottom: 20px;
+  animation: rotate-phone 2s ease-in-out infinite alternate;
+}
+
+.rotate-content h2 {
+  font-family: 'Creepster', cursive;
+  font-size: 36px;
+  color: #4fe39a;
+  margin: 0 0 12px;
+}
+
+.rotate-content p {
+  font-size: 15px;
+  color: #c9bcbf;
+  line-height: 1.5;
+}
+
+@keyframes rotate-phone {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(90deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rotate-icon {
+    animation: none;
+  }
+}
+
+
+/* ===== Mobiles Querformat: Startmenü anpassen ===== */
+
+@media (orientation: landscape) and (pointer: coarse) and (max-height: 600px) {
+
+  .screen {
+    padding: 8px 16px;
+    justify-content: center;
+    gap: 8px;
+  }
+
+  .screen-start {
+    overflow-y: auto;
+    justify-content: flex-start;
+  }
+
+  .start-ghost {
+    width: 35px;
+  }
+
+  .start-title h1 {
+    font-size: 38px;
+    margin: 0;
+  }
+
+  .whisper {
+    font-size: 11px;
+    min-height: 0;
+  }
+
+  .start-buttons {
+    gap: 5px;
+    width: min(300px, 90%);
+  }
+
+  .start-buttons .btn {
+    padding: 7px 12px;
+    font-size: 12px;
+  }
+
+  .screen-enter .enter-ghost {
+    width: 35px;
+  }
+
+  .enter-content {
+    gap: 6px;
+  }
+
+  .enter-text {
+    font-size: 28px;
+  }
 }
