@@ -104,6 +104,9 @@ export class Hud {
   private lastUvKey = '';
   private levelBadge = document.createElement('div');
   private lastLevel = -1;
+  private scoreBadge = document.createElement('div');
+  private scoreValue = document.createElement('b');
+  private lastScore = -1;
   private levelIntro = document.createElement('div');
   private levelIntroTimer = 0;
   /** Wohin der ←-Button in den Settings führt */
@@ -417,6 +420,7 @@ export class Hud {
       this.timer,
       this.ghostsLeft,
       this.levelBadge,
+      this.scoreBadge,
       this.radar,
       this.arrow,
       this.pauseButton,
@@ -439,6 +443,12 @@ export class Hud {
 
     // Level-Anzeige neben dem Pause-Button
     this.levelBadge.className = 'hud-level';
+
+    // Punktestand unter Pause & Level
+    this.scoreBadge.className = 'hud-score';
+    const scoreLabel = document.createElement('small');
+    scoreLabel.textContent = 'Score';
+    this.scoreBadge.append(scoreLabel, this.scoreValue);
 
     // Level-Einblendung zu Rundenbeginn
     this.levelIntro.className = 'level-intro';
@@ -909,6 +919,16 @@ export class Hud {
     if (state.level !== this.lastLevel) {
       this.levelBadge.innerHTML = `<small>Level</small><b>${state.level}</b>`;
       this.lastLevel = state.level;
+    }
+    if (state.score !== this.lastScore) {
+      // Punkte dazu → kurz aufleuchten
+      if (state.score > this.lastScore && this.lastScore >= 0) {
+        this.scoreBadge.classList.remove('bump');
+        void this.scoreBadge.offsetWidth;
+        this.scoreBadge.classList.add('bump');
+      }
+      this.scoreValue.textContent = String(state.score);
+      this.lastScore = state.score;
     }
     this.updateUv(state.uvOn, state.battery);
     // Pause-Menü zeigen, solange pausiert (auch bei Auto-Pause durch Tab-Wechsel)

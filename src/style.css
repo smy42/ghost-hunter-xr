@@ -1071,3 +1071,30 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .radar-sweep, .radar-dot.type-evil, .arrow-icon { animation: none; }
 }
+
+/* --- Punktestand unter Pause & Level (Person C) --- */
+.hud-score {
+  position: absolute;
+  top: 88px;
+  left: 16px;
+  min-width: 108px;
+  padding: 5px 12px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  border-radius: 10px;
+  background: var(--panel);
+}
+.hud-score small { font-size: 11px; opacity: 0.8; }
+.hud-score b { font-size: 18px; font-variant-numeric: tabular-nums; }
+.hud-score.bump b { animation: score-bump 0.6s ease-out; }
+@keyframes score-bump {
+  0%   { color: var(--green); text-shadow: 0 0 12px var(--green); transform: scale(1.35); }
+  100% { color: white; text-shadow: none; transform: scale(1); }
+}
+.hud-score b { display: inline-block; }
+@media (prefers-reduced-motion: reduce) {
+  .hud-score.bump b { animation: none; }
+}
