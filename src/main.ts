@@ -12,13 +12,13 @@ import './style.css';
 import { createSceneContext } from './core/scene';
 import { setupAR, updateTracking, resetTracking } from './xr/arSession';
 import { showRitual, hideRitual, getRoomSize } from './xr/ritual';
-import { spawnGhosts, removeGhosts, updateGhosts, createSpawnOptions, setUvLight, setStruggle, breakFree, summonNextGhost, resetSummon } from './ghosts/ghostSpawner';
+import { spawnGhosts, removeGhosts, updateGhosts, createSpawnOptions, setUvLight, setStruggle, breakFree, summonNextGhost, resetSummon, setGhostSpawnValidator } from './ghosts/ghostSpawner';
 import { DesktopMode } from './desktop/desktopMode';
 import { Game } from './game/game';
 import { getLevelConfig } from './game/levels';
 import { Hud } from './ui/hud';
 import { setupAtmosphere } from './effects/atmosphere';
-import { initAudio, startRoundAudio, updateAudio, playCapture, playSuccess, playWin, playGameOver, playGhostAppear, playEvilCaught, playTimeBonus, playMenuAudio, setTension, playTick, playJumpscare, startRitualAudio, playRitualConfirm, playEscape, playBreakFree, playApproach } from './audio/sound';
+import { initAudio, startRoundAudio, pauseAudio, resumeAudio, updateAudio, playCapture, playSuccess, playWin, playGameOver, playGhostAppear, playEvilCaught, playTimeBonus, playMenuAudio, setTension, playTick, playJumpscare, startRitualAudio, playRitualConfirm, playEscape, playBreakFree, playApproach } from './audio/sound';
 import type { Ghost, GameMode, GameSnapshot, GhostBehavior, RoundStatus, SpawnOptions } from './types';
 
 const { scene, camera, renderer } = createSceneContext();
@@ -65,6 +65,7 @@ function capture(): void {
 /** Laufende Runde pausieren. */
 function pauseGame(): void {
   game.pause();
+  pauseAudio();
 
   if (mode === 'desktop') {
     desktop.unlock();
@@ -74,6 +75,7 @@ function pauseGame(): void {
 /** Pausierte Runde fortsetzen. */
 function resumeGame(): void {
   game.resume();
+  resumeAudio();
 
   if (mode === 'desktop') {
     desktop.lock();
@@ -106,6 +108,30 @@ game.onTimeGhostCaught = () => {
 
 let mode: GameMode = 'desktop';
 let ghosts: Ghost[] = [];
+
+// Querformat-Hinweis nur für mobile Geräte im 3D-Modus
+const rotateOverlay = document.createElement('div');
+rotateOverlay.id = 'rotate-overlay';
+rotateOverlay.innerHTML = `
+  <div class="rotate-content">
+    <div class="rotate-icon">📱</div>
+    <h2>Rotate your phone</h2>
+    <p>Turn your phone sideways to play Ghost Hunter XR!</p>
+  </div>
+`;
+document.body.appendChild(rotateOverlay);
+
+function updateOrientation(): void {
+  const isMobile = window.matchMedia('(pointer: coarse) and (max-width: 900px)').matches;
+  const isPortrait = window.innerHeight > window.innerWidth;
+
+  rotateOverlay.style.display =
+    mode === 'desktop' && isMobile && isPortrait ? 'flex' : 'none';
+}
+
+window.addEventListener('resize', updateOrientation);
+window.addEventListener('orientationchange', updateOrientation);
+updateOrientation();
 
 // iPhone Camera AR – eigener Modus, unabhängig von Android WebXR
 
@@ -163,6 +189,13 @@ function startARRound(): void {
 
 /** Neue Runde starten: alte Geister weg, neue um den Spieler spawnen. */
 function startRound(center: THREE.Vector3): void {
+  // Nur im 3D-Modus die Haunted-House-Kollisionen prüfen.
+  // Android-AR verwendet weiterhin seine eigene Spawnlogik.
+  setGhostSpawnValidator(
+    mode === 'desktop'
+      ? (position) => desktop.isGhostPositionFree(position)
+      : null
+  );
   removeGhosts(scene, ghosts);
   resetSummon();
   summonTimer = 0;
@@ -255,6 +288,9 @@ renderer.setAnimationLoop(() => {
     hud.isHunting &&
     !trackingLost &&
     !state.paused;
+
+  desktop.setJoystickVisible(mode === 'desktop' && playing);
+
   setUvLight(state.uvOn && !TEST_UV_OFF);
   if (mode === 'desktop') {
     desktop.setUvLight(
@@ -275,7 +311,12 @@ renderer.setAnimationLoop(() => {
   playSoundsForChanges(state);
   updateTimerEffects(playing);
   updateAudio(dt, camera);
-  if (state.status !== 'playing' && lastStatusForCursor === 'playing' && mode === 'desktop') desktop.unlock(); // Cursor für den Endscreen
+  if (
+    mode === 'desktop' &&
+    (state.status === 'won' || state.status === 'lost')
+  ) {
+    desktop.unlock();
+  } // Cursor für den Endscreen
   lastStatusForCursor = state.status;
   hud.update(state);
   hud.updateAim(game.aim);

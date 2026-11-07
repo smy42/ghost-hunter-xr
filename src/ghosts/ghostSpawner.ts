@@ -178,6 +178,16 @@ let spawnQueue: Ghost[] = [];
 let nextSpawnIn = 0;
 let spawnCenter = new THREE.Vector3();
 let spawnOptions: SpawnOptions = DEFAULT_SPAWN;
+// Optionale Kollisionsprüfung für den 3D-Modus
+let isSpawnPositionFree:
+  ((position: THREE.Vector3) => boolean) | null = null;
+
+/** Kollisionsprüfung für das Haunted House registrieren. */
+export function setGhostSpawnValidator(
+  validator: ((position: THREE.Vector3) => boolean) | null,
+): void {
+  isSpawnPositionFree = validator;
+}
 /** UV-Licht: Ziel (an/aus) und aktueller, sanft übergeblendeter Wert (0 = aus, 1 = an) */
 let uvTarget = 1;
 let uvLevel = 1;
@@ -437,21 +447,70 @@ function appear(ghost: Ghost, animate: boolean): void {
 }
 
 /** Sucht eine zufällige Position im Radius, die nicht zu nah an anderen Geistern liegt. */
-function findFreePosition(center: THREE.Vector3, others: Ghost[], options: SpawnOptions): THREE.Vector3 {
-  let position = new THREE.Vector3();
-  for (let attempt = 0; attempt < 30; attempt++) {
-    const angle = Math.random() * Math.PI * 2;
-    const distance = options.minRadius + Math.random() * (options.maxRadius - options.minRadius);
-    const heightOffset = -0.7 + Math.random() * 0.9; // von ca. 70 cm unter bis 20 cm über Augenhöhe
-    position = new THREE.Vector3(
-      center.x + Math.cos(angle) * distance,
-      center.y + heightOffset,
-      center.z + Math.sin(angle) * distance,
-    );
-    if (others.every((g) => g.object.position.distanceTo(position) >= options.minSpacing)) break;
+
+function findFreePosition(
+  center: THREE.Vector3,
+  others: Ghost[],
+  options: SpawnOptions,
+): THREE.Vector3 {
+  // AR: bisherige Spawnlogik unverändert lassen
+  if (!isSpawnPositionFree) {
+    let position = new THREE.Vector3();
+
+    for (let attempt = 0; attempt < 30; attempt++) {
+      const angle = Math.random() * Math.PI * 2;
+      const distance =
+        options.minRadius +
+        Math.random() * (options.maxRadius - options.minRadius);
+
+      const heightOffset = -0.7 + Math.random() * 0.9;
+
+      position = new THREE.Vector3(
+        center.x + Math.cos(angle) * distance,
+        center.y + heightOffset,
+        center.z + Math.sin(angle) * distance,
+      );
+
+      if (others.every(
+        (g) => g.object.position.distanceTo(position) >= options.minSpacing
+      )) break;
+    }
+
+    return position;
   }
-  return position;
+
+  // 3D: Sichere Spawnpunkte in allen vier Zimmern
+  const rooms = [
+    { minX: -8.8, maxX: -2.5, minZ: -8.8, maxZ: -1.0 }, // Wohnzimmer
+    { minX: 2.5, maxX: 8.8, minZ: -8.8, maxZ: -1.0 },  // Schlafzimmer
+    { minX: -8.8, maxX: -2.5, minZ: 1.0, maxZ: 8.8 },  // Küche
+    { minX: 2.5, maxX: 8.8, minZ: 1.0, maxZ: 8.8 },   // Abstellraum
+  ];
+
+  // Mehrere zufällige Versuche in verschiedenen Zimmern
+  for (let attempt = 0; attempt < 150; attempt++) {
+    const room = rooms[Math.floor(Math.random() * rooms.length)];
+
+    const position = new THREE.Vector3(
+      room.minX + Math.random() * (room.maxX - room.minX),
+      center.y - 0.7 + Math.random() * 0.9,
+      room.minZ + Math.random() * (room.maxZ - room.minZ),
+    );
+
+    const enoughSpacing = others.every(
+      (g) => g.object.position.distanceTo(position) >= options.minSpacing,
+    );
+
+    if (enoughSpacing && isSpawnPositionFree(position)) {
+      return position;
+    }
+  }
+
+  // Falls kein freier Punkt gefunden wurde:
+  // kontrolliert abbrechen statt einen Geist in eine Wand zu setzen
+  throw new Error('Kein freier Ghost-Spawnpunkt im Haunted House gefunden.');
 }
+
 
 export function removeGhosts(scene: THREE.Scene, ghosts: Ghost[]): void {
   spawnQueue = spawnQueue.filter((g) => !ghosts.includes(g));
@@ -566,6 +625,46 @@ export function updateGhosts(dt: number, player?: THREE.Vector3): GhostUpdate {
 
 const tmp = new THREE.Vector3();
 
+
+/**
+ * Bewegt einen Geist im 3D-Modus mit Kollisionsprüfung.
+ * Im AR-Modus bleibt die Bewegung unverändert.
+ */
+function moveGhostSafely(
+  pos: THREE.Vector3,
+  dx: number,
+  dz: number,
+): boolean {
+  if (!isSpawnPositionFree) {
+    pos.x += dx;
+    pos.z += dz;
+    return true;
+  }
+
+  let moved = false;
+
+  // X-Richtung separat prüfen
+  const nextX = pos.clone();
+  nextX.x += dx;
+
+  if (isSpawnPositionFree(nextX)) {
+    pos.x = nextX.x;
+    moved = true;
+  }
+
+  // Z-Richtung separat prüfen
+  const nextZ = pos.clone();
+  nextZ.z += dz;
+
+  if (isSpawnPositionFree(nextZ)) {
+    pos.z = nextZ.z;
+    moved = true;
+  }
+
+  return moved;
+}
+
+
 /**
  * Bewegt einen Geist je nach Verhalten (nur waagrecht – die Höhe macht das Schweben).
  * @returns 'teleported' / 'escaped', wenn das gerade passiert ist, sonst null
@@ -598,20 +697,43 @@ function moveGhost(ghost: Ghost, dt: number, player: THREE.Vector3): 'teleported
   const distance = away.length();
 
   // Hat sich beim Fangen losgerissen: kurz schnell vom Spieler weg (egal welches Verhalten)
+
   if (data.breakFreeTime > 0) {
     data.breakFreeTime -= dt;
+
     if (distance > 0.001) {
       away.normalize();
-      pos.x += away.x * speed * BREAK_FREE_SPEED_FACTOR * dt;
-      pos.z += away.z * speed * BREAK_FREE_SPEED_FACTOR * dt;
+
+      const dx = away.x * speed * BREAK_FREE_SPEED_FACTOR * dt;
+      const dz = away.z * speed * BREAK_FREE_SPEED_FACTOR * dt;
+
+      // AR: ursprüngliche Bewegung beibehalten
+      // Desktop: Wände und Möbel berücksichtigen
+      if (!isSpawnPositionFree) {
+        pos.x += dx;
+        pos.z += dz;
+      } else {
+        const moved = moveGhostSafely(pos, dx, dz);
+
+        // Wenn eine Wand den Geist blockiert,
+        // endet seine Flucht an dieser Stelle.
+        if (!moved) {
+          data.breakFreeTime = 0;
+          return null;
+        }
+      }
     }
-    if (clampToRadius(pos)) {
+
+    // Nur AR verwendet weiterhin die ursprüngliche Radiusgrenze.
+    if (!isSpawnPositionFree && clampToRadius(pos)) {
       data.breakFreeTime = 0;
-      data.escapeTime = ESCAPE_DURATION; // am Rand angekommen → durch die Wand
+      data.escapeTime = ESCAPE_DURATION;
       return 'escaped';
     }
+
     return null;
   }
+
 
   // In den letzten Sekunden herbeigerufen: schwebt zu dir bzw. bleibt in deiner Nähe (kein Wandern/Flüchten mehr)
   if (data.summoned) {
@@ -621,14 +743,43 @@ function moveGhost(ghost: Ghost, dt: number, player: THREE.Vector3): 'teleported
       const dz = target.z - pos.z;
       const left = Math.hypot(dx, dz);
       const step = SUMMON_FLOAT_SPEED * dt;
+
       if (left <= step) {
-        pos.x = target.x;
-        pos.z = target.z;
-        data.summonTarget = null;
+        const moved = moveGhostSafely(pos, dx, dz);
+
+        if (moved || left < 0.001) {
+          data.summonTarget = null;
+        } else if (isSpawnPositionFree) {
+          // Hindernis blockiert den direkten Weg:
+          // Geist erscheint stattdessen sicher in Spielnähe.
+          const safeTarget = findSafeSummonPosition(player);
+
+          if (safeTarget) {
+            pos.copy(safeTarget);
+            data.baseY = safeTarget.y;
+          }
+
+          data.summonTarget = null;
+        }
       } else {
-        pos.x += (dx / left) * step;
-        pos.z += (dz / left) * step;
+        const moved = moveGhostSafely(
+          pos,
+          (dx / left) * step,
+          (dz / left) * step,
+        );
+
+        if (!moved && isSpawnPositionFree) {
+          const safeTarget = findSafeSummonPosition(player);
+
+          if (safeTarget) {
+            pos.copy(safeTarget);
+            data.baseY = safeTarget.y;
+          }
+
+          data.summonTarget = null;
+        }
       }
+
     }
     return null; // darf hier auch außerhalb des Radius sein – er kommt ja zu dir
   }
@@ -637,7 +788,9 @@ function moveGhost(ghost: Ghost, dt: number, player: THREE.Vector3): 'teleported
     case 'wander': {
       if (!data.wanderTarget) {
         data.wanderPause -= dt;
-        if (data.wanderPause <= 0) data.wanderTarget = randomPointInRadius();
+        if (data.wanderPause <= 0) {
+          data.wanderTarget = randomWanderTarget(pos);
+        }
         break;
       }
       const target = data.wanderTarget as THREE.Vector3;
@@ -651,8 +804,17 @@ function moveGhost(ghost: Ghost, dt: number, player: THREE.Vector3): 'teleported
         data.wanderTarget = null;
         data.wanderPause = randomBetween(...WANDER_PAUSE);
       } else {
-        pos.x += (dx / left) * step;
-        pos.z += (dz / left) * step;
+        const moved = moveGhostSafely(
+          pos,
+          (dx / left) * step,
+          (dz / left) * step,
+        );
+
+        // Wenn eine Wand blockiert, später ein neues Ziel suchen.
+        if (!moved) {
+          data.wanderTarget = null;
+          data.wanderPause = randomBetween(...WANDER_PAUSE);
+        }
       }
       break;
     }
@@ -667,8 +829,11 @@ function moveGhost(ghost: Ghost, dt: number, player: THREE.Vector3): 'teleported
       const len = Math.hypot(dirX, dirZ);
       // Je näher der Spieler, desto schneller
       const urgency = 1 + (1 - distance / fleeDistance);
-      pos.x += (dirX / len) * speed * urgency * dt;
-      pos.z += (dirZ / len) * speed * urgency * dt;
+      moveGhostSafely(
+        pos,
+        (dirX / len) * speed * urgency * dt,
+        (dirZ / len) * speed * urgency * dt,
+      );
       break;
     }
 
@@ -696,7 +861,7 @@ function moveGhost(ghost: Ghost, dt: number, player: THREE.Vector3): 'teleported
     }
   }
 
-  const atEdge = clampToRadius(pos);
+  const atEdge = !isSpawnPositionFree && clampToRadius(pos);
   // Flüchtender Geist an den Rand gedrängt, Spieler noch nah dran → „durch die Wand" entkommen
   if (atEdge && ghost.behavior === 'flee' && distance < fleeDistance) {
     data.escapeTime = ESCAPE_DURATION;
@@ -751,6 +916,54 @@ function randomPointInRadius(): THREE.Vector3 {
   const r = spawnOptions.minRadius + Math.random() * (spawnOptions.maxRadius - spawnOptions.minRadius);
   return new THREE.Vector3(spawnCenter.x + Math.cos(angle) * r, 0, spawnCenter.z + Math.sin(angle) * r);
 }
+
+
+/**
+ * Sucht im Desktop-Modus ein freies Wanderziel
+ * in demselben Zimmer wie der Geist.
+ */
+function randomWanderTarget(pos: THREE.Vector3): THREE.Vector3 {
+  // AR behält seine bisherige Logik.
+  if (!isSpawnPositionFree) {
+    return randomPointInRadius();
+  }
+
+  const rooms = [
+    { minX: -8.8, maxX: -2.5, minZ: -8.8, maxZ: -1.0 },
+    { minX: 2.5, maxX: 8.8, minZ: -8.8, maxZ: -1.0 },
+    { minX: -8.8, maxX: -2.5, minZ: 1.0, maxZ: 8.8 },
+    { minX: 2.5, maxX: 8.8, minZ: 1.0, maxZ: 8.8 },
+  ];
+
+  // Zimmer anhand der aktuellen Position finden.
+  const room = rooms.find(
+    (r) =>
+      pos.x >= r.minX &&
+      pos.x <= r.maxX &&
+      pos.z >= r.minZ &&
+      pos.z <= r.maxZ
+  );
+
+  // Falls der Geist gerade im Flur ist:
+  // vorerst an seiner Position bleiben.
+  if (!room) return pos.clone();
+
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const target = new THREE.Vector3(
+      room.minX + Math.random() * (room.maxX - room.minX),
+      pos.y,
+      room.minZ + Math.random() * (room.maxZ - room.minZ),
+    );
+
+    if (isSpawnPositionFree(target)) {
+      return target;
+    }
+  }
+
+  // Kein freier Zielpunkt gefunden.
+  return pos.clone();
+}
+
 
 function randomBetween(min: number, max: number): number {
   return min + Math.random() * (max - min);
@@ -832,6 +1045,35 @@ export function resetSummon(): void {
  * nicht der böse Geist (der soll verwirren, nicht helfen). In main.ts alle ~2 s aufrufen.
  * @returns den geholten Geist + wie er kommt, oder null, wenn keiner mehr weit weg ist
  */
+
+/**
+ * Findet eine freie Position in der Nähe des Spielers.
+ * Nur für den Desktop-Modus.
+ */
+function findSafeSummonPosition(
+  player: THREE.Vector3,
+): THREE.Vector3 | null {
+  if (!isSpawnPositionFree) return null;
+
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const angle = Math.random() * Math.PI * 2;
+    const distance = randomBetween(...SUMMON_RANGE);
+
+    const target = new THREE.Vector3(
+      player.x + Math.cos(angle) * distance,
+      player.y - 0.7 + Math.random() * 0.9,
+      player.z + Math.sin(angle) * distance,
+    );
+
+    if (isSpawnPositionFree(target)) {
+      return target;
+    }
+  }
+
+  return null;
+}
+
+
 export function summonNextGhost(player: THREE.Vector3): { ghost: Ghost; kind: SummonKind } | null {
   const distanceTo = (g: Ghost) => Math.hypot(g.object.position.x - player.x, g.object.position.z - player.z);
   const candidates = activeGhosts.filter(
@@ -853,9 +1095,25 @@ export function summonNextGhost(player: THREE.Vector3): { ghost: Ghost; kind: Su
   data.summoned = true;
 
   // Zielpunkt in deiner Nähe
+
   const angle = Math.random() * Math.PI * 2;
   const r = randomBetween(...SUMMON_RANGE);
-  const target = new THREE.Vector3(player.x + Math.cos(angle) * r, 0, player.z + Math.sin(angle) * r);
+
+  const target = isSpawnPositionFree
+    ? findSafeSummonPosition(player)
+    : new THREE.Vector3(
+      player.x + Math.cos(angle) * r,
+      0,
+      player.z + Math.sin(angle) * r,
+    );
+
+  // Kein freier Platz im Haunted House gefunden:
+  // Herbeirufen abbrechen.
+  if (!target) {
+    data.summoned = false;
+    return null;
+  }
+
 
   // Versteckte Geister können nicht heranschweben → tauchen immer auf
   const kind: SummonKind = ghost.hidden ? 'appear' : nextSummonKind;
