@@ -4,7 +4,7 @@
 // Alles liegt im <div id="ui">. Dieses Element bleibt auch in AR sichtbar (dom-overlay).
 // Also: Anzeigen IMMER in #ui einhängen, nicht direkt in <body>.
 
-import type { GameSnapshot } from '../types';
+import type { GameSnapshot, Settings } from '../types';
 
 export interface HudCallbacks {
   /** "Start Hunt" wurde gedrückt → Runde starten (main.ts) */
@@ -14,15 +14,21 @@ export interface HudCallbacks {
   onCapture: () => void;
   /** Zurück ins Hauptmenü (z. B. vom „Hunt Complete"-Screen) → Menü-Musik */
   onMenu?: () => void;
+  /** Pause-Button gedrückt → game.pause() (main.ts) */
+  onPause?: () => void;
+  /** „Resume" im Pause-Menü → game.resume() (main.ts) */
+  onResume?: () => void;
+  /** UV-Button gedrückt → game.toggleUv() (main.ts) */
+  onToggleUv?: () => void;
 }
 
-/** Einstellungen – andere Bereiche können sie über hud.settings lesen. */
-export interface Settings {
-  sound: boolean;
-  vibration: boolean;
-  /** Jumpscares & rote Augen auf dem Startscreen */
-  scary: boolean;
-}
+/** Kurzer Text zu Rundenbeginn, je nach Level */
+const LEVEL_TAGLINES = [
+  'They are waiting…', // Level 1
+  'They are moving…', // Level 2
+  'They run from you…', // Level 3
+  'They can vanish…', // Level 4+
+];
 
 const SETTINGS_KEY = 'ghost-hunter-settings';
 const DEFAULT_SETTINGS: Settings = { sound: true, vibration: true, scary: true };
@@ -81,6 +87,21 @@ export class Hud {
   private popup = document.createElement('div');
   private popupTimer = 0;
 
+  // Pause, UV-Licht, Level
+  private pauseButton = document.createElement('button');
+  private pauseOverlay = document.createElement('div');
+  private uvButton = document.createElement('button');
+  private batteryFill = document.createElement('i');
+  private uvLabel = document.createElement('b');
+  private batteryText = document.createElement('small');
+  private lastUvKey = '';
+  private levelBadge = document.createElement('div');
+  private lastLevel = -1;
+  private levelIntro = document.createElement('div');
+  private levelIntroTimer = 0;
+  /** Wohin der ←-Button in den Settings führt */
+  private settingsReturn: 'start' | 'pause' = 'start';
+
   constructor(callbacks: HudCallbacks) {
     this.callbacks = callbacks;
     this.buildStartScreen();
@@ -110,8 +131,7 @@ export class Hud {
     this.showStart();
     this.buildEnterGate();
 
-    // TODO (Person C): Fadenkreuz, Fangbalken, Pfeil mit Distanz, Radar
-    // TODO (Person C): Screens – Hunt Complete, Game Over, Pause
+    // TODO (Person C): Pfeil mit Distanz / Radar zum nächsten Geist
   }
 
   /** Aktuelle Einstellungen (z. B. hud.settings.sound) */
@@ -179,7 +199,7 @@ export class Hud {
     this.onAction(this.startScreen, {
       start: () => this.startHunt(),
       howto: () => this.showHowTo(),
-      settings: () => this.showSettings(),
+      settings: () => this.showSettings('start'),
     });
   }
 
@@ -322,7 +342,9 @@ export class Hud {
       });
     });
 
-    this.onAction(this.settingsScreen, { home: () => this.showStart() });
+    this.onAction(this.settingsScreen, {
+      home: () => (this.settingsReturn === 'pause' ? this.showHunt() : this.showStart()),
+    });
   }
 
   // ---------- Jagd-Anzeige ----------
@@ -368,7 +390,110 @@ export class Hud {
     this.timer.append(this.timerValue, this.timerWhisper);
     this.danger.className = 'hud-danger';
 
-    this.huntLayer.append(this.danger, this.crosshair, this.timer, this.ghostsLeft, this.captureButton, this.popup);
+    this.buildPauseUvLevel();
+
+    this.huntLayer.append(
+      this.danger,
+      this.crosshair,
+      this.timer,
+      this.ghostsLeft,
+      this.levelBadge,
+      this.pauseButton,
+      this.uvButton,
+      this.captureButton,
+      this.popup,
+      this.levelIntro,
+      this.pauseOverlay,
+    );
+  }
+
+  // ---------- Pause-Button, Pause-Menü, UV-Button, Level-Anzeige ----------
+
+  private buildPauseUvLevel(): void {
+    // Pause-Button oben links (Desktop: Taste P)
+    this.pauseButton.className = 'hud-pause';
+    this.pauseButton.setAttribute('aria-label', 'Pause');
+    this.pauseButton.innerHTML = '<span class="pause-icon"></span><kbd>P</kbd>';
+    this.pauseButton.addEventListener('click', () => this.callbacks.onPause?.());
+
+    // Level-Anzeige neben dem Pause-Button
+    this.levelBadge.className = 'hud-level';
+
+    // Level-Einblendung zu Rundenbeginn
+    this.levelIntro.className = 'level-intro';
+    this.levelIntro.hidden = true;
+
+    // UV-Button unten rechts (gut mit dem Daumen erreichbar, Desktop: Taste F)
+    this.uvButton.className = 'hud-uv';
+    this.uvButton.setAttribute('aria-label', 'UV light on/off');
+    const icon = document.createElement('span');
+    icon.className = 'uv-icon';
+    icon.textContent = '🔦';
+    const bar = document.createElement('span');
+    bar.className = 'uv-battery';
+    bar.append(this.batteryFill);
+    const key = document.createElement('kbd');
+    key.textContent = 'F';
+    this.uvButton.append(icon, this.uvLabel, bar, this.batteryText, key);
+    // pointerdown → reagiert sofort, auch mitten im Fangen
+    this.uvButton.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      this.vibrate(15);
+      this.callbacks.onToggleUv?.();
+    });
+
+    // Pause-Menü (liegt über allem im HUD, z-index 12)
+    this.pauseOverlay.className = 'screen screen-pause';
+    this.pauseOverlay.hidden = true;
+    this.pauseOverlay.innerHTML = `
+      <div class="fog"></div>
+      <div class="vignette"></div>
+      <div class="pause-title">
+        <h1>PAUSED</h1>
+        <p class="pause-sub">They are still here… waiting for you.</p>
+      </div>
+      <div class="start-buttons">
+        <button class="btn btn-primary" data-action="resume">▶&nbsp; Resume</button>
+        <button class="btn" data-action="settings">Settings</button>
+        <button class="btn" data-action="menu">Main Menu</button>
+      </div>
+    `;
+    this.onAction(this.pauseOverlay, {
+      resume: () => this.callbacks.onResume?.(),
+      settings: () => this.showSettings('pause'),
+      menu: () => {
+        this.callbacks.onMenu?.(); // Menü-Musik (playMenuAudio)
+        this.showStart();
+      },
+    });
+  }
+
+  /** Zu Rundenbeginn kurz „Level 2 – They are moving…" einblenden (aus main.ts → startRound). */
+  showLevelIntro(level: number): void {
+    const tagline = LEVEL_TAGLINES[Math.min(level, LEVEL_TAGLINES.length) - 1];
+    this.levelIntro.innerHTML = `<small>LEVEL ${level}</small><b>${tagline}</b>`;
+    this.levelIntro.hidden = false;
+    this.levelIntro.classList.remove('show');
+    void this.levelIntro.offsetWidth; // Animation neu starten
+    this.levelIntro.classList.add('show');
+    window.clearTimeout(this.levelIntroTimer);
+    this.levelIntroTimer = window.setTimeout(() => (this.levelIntro.hidden = true), 3000);
+  }
+
+  /** UV-Button & Akkubalken. Unter 20 % rot und blinkend. */
+  private updateUv(uvOn: boolean, battery: number): void {
+    const percent = Math.round(battery);
+    const key = `${uvOn}|${percent}`;
+    if (key === this.lastUvKey) return;
+    this.lastUvKey = key;
+
+    const empty = !uvOn && battery < 1;
+    this.uvButton.classList.toggle('is-on', uvOn);
+    this.uvButton.classList.toggle('is-low', percent < 20);
+    this.uvButton.classList.toggle('is-empty', empty);
+    this.uvLabel.textContent = empty ? 'EMPTY' : uvOn ? 'UV ON' : 'UV OFF';
+    this.batteryText.textContent = `${percent} %`;
+    this.batteryFill.style.width = `${percent}%`;
   }
 
   /**
@@ -525,6 +650,8 @@ export class Hud {
       (this.lostScreen.querySelector<HTMLElement>(`[data-stat="${stat}"]`)!.textContent = value);
     set('ghosts', `${state.ghostsTotal - state.ghostsLeft}/${state.ghostsTotal}`);
     set('score', String(state.score));
+    this.lostScreen.querySelector<HTMLElement>('[data-action="retry"]')!.innerHTML =
+      `↻&nbsp; Try Again – Level ${state.level}`;
     this.show(this.lostScreen);
   }
 
@@ -554,6 +681,10 @@ export class Hud {
     set('score', String(state.score));
     const seconds = Math.floor(state.time);
     set('time', `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`);
+    this.completeScreen.querySelector<HTMLElement>('.complete-sub')!.textContent =
+      `Level ${state.level} cleared. The house is quiet… for now.`;
+    this.completeScreen.querySelector<HTMLElement>('[data-action="next"]')!.textContent =
+      `Level ${state.level + 1} ▶`;
     this.show(this.completeScreen);
   }
 
@@ -572,7 +703,9 @@ export class Hud {
     this.showHowToPage(0);
   }
 
-  showSettings(): void {
+  /** @param from Von wo aus geöffnet → dorthin führt der ←-Button zurück */
+  showSettings(from: 'start' | 'pause' = 'start'): void {
+    this.settingsReturn = from;
     this.show(this.settingsScreen);
   }
 
@@ -604,6 +737,15 @@ export class Hud {
   // ---------- jeden Frame ----------
 
   update(state: GameSnapshot): void {
+    if (state.level !== this.lastLevel) {
+      this.levelBadge.innerHTML = `<small>Level</small><b>${state.level}</b>`;
+      this.lastLevel = state.level;
+    }
+    this.updateUv(state.uvOn, state.battery);
+    // Pause-Menü zeigen, solange pausiert (auch bei Auto-Pause durch Tab-Wechsel)
+    const showPause = state.paused && state.status === 'playing';
+    if (this.pauseOverlay.hidden === showPause) this.pauseOverlay.hidden = !showPause;
+
     if (state.ghostsLeft !== this.lastGhostsLeft) {
       this.ghostsLeftNumber.textContent = String(state.ghostsLeft);
       this.lastGhostsLeft = state.ghostsLeft;
