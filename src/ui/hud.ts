@@ -4,7 +4,14 @@
 // Alles liegt im <div id="ui">. Dieses Element bleibt auch in AR sichtbar (dom-overlay).
 // Also: Anzeigen IMMER in #ui einhängen, nicht direkt in <body>.
 
-import type { GameSnapshot } from '../types';
+import { Vector3 } from 'three';
+import type { Camera } from 'three';
+import type { Ghost, GameSnapshot, Settings } from '../types';
+
+/** Reichweite des Radars in Metern – weiter entfernte Geister kleben am Rand */
+const RADAR_RANGE = 8;
+/** Abstand des Pfeils zum Bildschirmrand (px): seitlich, oben (unter Timer & Co.), unten (über den Buttons) */
+const ARROW_MARGIN = { side: 44, top: 110, bottom: 150 };
 
 export interface HudCallbacks {
   /** "Start Hunt" wurde gedrückt → Runde starten (main.ts) */
@@ -14,15 +21,21 @@ export interface HudCallbacks {
   onCapture: () => void;
   /** Zurück ins Hauptmenü (z. B. vom „Hunt Complete"-Screen) → Menü-Musik */
   onMenu?: () => void;
+  /** Pause-Button gedrückt → game.pause() (main.ts) */
+  onPause?: () => void;
+  /** „Resume" im Pause-Menü → game.resume() (main.ts) */
+  onResume?: () => void;
+  /** UV-Button gedrückt → game.toggleUv() (main.ts) */
+  onToggleUv?: () => void;
 }
 
-/** Einstellungen – andere Bereiche können sie über hud.settings lesen. */
-export interface Settings {
-  sound: boolean;
-  vibration: boolean;
-  /** Jumpscares & rote Augen auf dem Startscreen */
-  scary: boolean;
-}
+/** Kurzer Text zu Rundenbeginn, je nach Level */
+const LEVEL_TAGLINES = [
+  'They are waiting…', // Level 1
+  'They are moving…', // Level 2
+  'They run from you…', // Level 3
+  'They can vanish…', // Level 4+
+];
 
 const SETTINGS_KEY = 'ghost-hunter-settings';
 const DEFAULT_SETTINGS: Settings = { sound: true, vibration: true, scary: true };
@@ -81,6 +94,36 @@ export class Hud {
   private popup = document.createElement('div');
   private popupTimer = 0;
 
+  // Pause, UV-Licht, Level
+  private pauseButton = document.createElement('button');
+  private pauseOverlay = document.createElement('div');
+  private uvButton = document.createElement('button');
+  private batteryFill = document.createElement('i');
+  private uvLabel = document.createElement('b');
+  private batteryText = document.createElement('small');
+  private lastUvKey = '';
+  private levelBadge = document.createElement('div');
+  private lastLevel = -1;
+  private scoreBadge = document.createElement('div');
+  private scoreValue = document.createElement('b');
+  private lastScore = -1;
+  private levelIntro = document.createElement('div');
+  private levelIntroTimer = 0;
+  /** Wohin der ←-Button in den Settings führt */
+  private settingsReturn: 'start' | 'pause' = 'start';
+
+  // Radar & Pfeil zum nächsten Geist
+  private radar = document.createElement('div');
+  private radarDots = new Map<number, HTMLElement>();
+  private arrow = document.createElement('div');
+  private arrowIcon!: SVGElement;
+  private arrowDist!: HTMLElement;
+  private lastArrowText = '';
+  private camPos = new Vector3();
+  private camDir = new Vector3();
+  private ghostPos = new Vector3();
+  private projected = new Vector3();
+
   constructor(callbacks: HudCallbacks) {
     this.callbacks = callbacks;
     this.buildStartScreen();
@@ -110,8 +153,6 @@ export class Hud {
     this.showStart();
     this.buildEnterGate();
 
-    // TODO (Person C): Fadenkreuz, Fangbalken, Pfeil mit Distanz, Radar
-    // TODO (Person C): Screens – Hunt Complete, Game Over, Pause
   }
 
   /** Aktuelle Einstellungen (z. B. hud.settings.sound) */
@@ -179,7 +220,7 @@ export class Hud {
     this.onAction(this.startScreen, {
       start: () => this.startHunt(),
       howto: () => this.showHowTo(),
-      settings: () => this.showSettings(),
+      settings: () => this.showSettings('start'),
     });
   }
 
@@ -322,7 +363,9 @@ export class Hud {
       });
     });
 
-    this.onAction(this.settingsScreen, { home: () => this.showStart() });
+    this.onAction(this.settingsScreen, {
+      home: () => (this.settingsReturn === 'pause' ? this.showHunt() : this.showStart()),
+    });
   }
 
   // ---------- Jagd-Anzeige ----------
@@ -368,7 +411,268 @@ export class Hud {
     this.timer.append(this.timerValue, this.timerWhisper);
     this.danger.className = 'hud-danger';
 
-    this.huntLayer.append(this.danger, this.crosshair, this.timer, this.ghostsLeft, this.captureButton, this.popup);
+    this.buildPauseUvLevel();
+    this.buildRadar();
+
+    this.huntLayer.append(
+      this.danger,
+      this.crosshair,
+      this.timer,
+      this.ghostsLeft,
+      this.levelBadge,
+      this.scoreBadge,
+      this.radar,
+      this.arrow,
+      this.pauseButton,
+      this.uvButton,
+      this.captureButton,
+      this.popup,
+      this.levelIntro,
+      this.pauseOverlay,
+    );
+  }
+
+  // ---------- Pause-Button, Pause-Menü, UV-Button, Level-Anzeige ----------
+
+  private buildPauseUvLevel(): void {
+    // Pause-Button oben links (Desktop: Taste P)
+    this.pauseButton.className = 'hud-pause';
+    this.pauseButton.setAttribute('aria-label', 'Pause');
+    this.pauseButton.innerHTML = '<span class="pause-icon"></span><kbd>P</kbd>';
+    this.pauseButton.addEventListener('click', () => this.callbacks.onPause?.());
+
+    // Level-Anzeige neben dem Pause-Button
+    this.levelBadge.className = 'hud-level';
+
+    // Punktestand unter Pause & Level
+    this.scoreBadge.className = 'hud-score';
+    const scoreLabel = document.createElement('small');
+    scoreLabel.textContent = 'Score';
+    this.scoreBadge.append(scoreLabel, this.scoreValue);
+
+    // Level-Einblendung zu Rundenbeginn
+    this.levelIntro.className = 'level-intro';
+    this.levelIntro.hidden = true;
+
+    // UV-Button unten rechts (gut mit dem Daumen erreichbar, Desktop: Taste F)
+    this.uvButton.className = 'hud-uv';
+    this.uvButton.setAttribute('aria-label', 'UV light on/off');
+    const icon = document.createElement('span');
+    icon.className = 'uv-icon';
+    icon.textContent = '🔦';
+    const bar = document.createElement('span');
+    bar.className = 'uv-battery';
+    bar.append(this.batteryFill);
+    const key = document.createElement('kbd');
+    key.textContent = 'F';
+    this.uvButton.append(icon, this.uvLabel, bar, this.batteryText, key);
+    // pointerdown → reagiert sofort, auch mitten im Fangen
+    this.uvButton.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      this.vibrate(15);
+      this.callbacks.onToggleUv?.();
+    });
+
+    // Pause-Menü (liegt über allem im HUD, z-index 12)
+    this.pauseOverlay.className = 'screen screen-pause';
+    this.pauseOverlay.hidden = true;
+    this.pauseOverlay.innerHTML = `
+      <div class="fog"></div>
+      <div class="vignette"></div>
+      <div class="pause-title">
+        <h1>PAUSED</h1>
+        <p class="pause-sub">They are still here… waiting for you.</p>
+      </div>
+      <div class="start-buttons">
+        <button class="btn btn-primary" data-action="resume">▶&nbsp; Resume</button>
+        <button class="btn" data-action="settings">Settings</button>
+        <button class="btn" data-action="menu">Main Menu</button>
+      </div>
+    `;
+    this.onAction(this.pauseOverlay, {
+      resume: () => this.callbacks.onResume?.(),
+      settings: () => this.showSettings('pause'),
+      menu: () => {
+        this.callbacks.onMenu?.(); // Menü-Musik (playMenuAudio)
+        this.showStart();
+      },
+    });
+  }
+
+  /** Zu Rundenbeginn kurz „Level 2 – They are moving…" einblenden (aus main.ts → startRound). */
+  showLevelIntro(level: number): void {
+    const tagline = LEVEL_TAGLINES[Math.min(level, LEVEL_TAGLINES.length) - 1];
+    this.levelIntro.innerHTML = `<small>LEVEL ${level}</small><b>${tagline}</b>`;
+    this.levelIntro.hidden = false;
+    this.levelIntro.classList.remove('show');
+    void this.levelIntro.offsetWidth; // Animation neu starten
+    this.levelIntro.classList.add('show');
+    window.clearTimeout(this.levelIntroTimer);
+    this.levelIntroTimer = window.setTimeout(() => (this.levelIntro.hidden = true), 3000);
+  }
+
+  // ---------- Radar & Pfeil zum nächsten Geist ----------
+
+  private buildRadar(): void {
+    // Mini-Radar oben rechts: Mitte = du, oben = Blickrichtung
+    this.radar.className = 'hud-radar';
+    this.radar.setAttribute('aria-hidden', 'true');
+    this.radar.innerHTML = `
+      <div class="radar-sweep"></div>
+      <div class="radar-ring"></div>
+      <div class="radar-cone"></div>
+      <div class="radar-me"></div>
+    `;
+
+    // Pfeil am Bildschirmrand, wenn der nächste Geist nicht im Bild ist
+    this.arrow.className = 'hud-arrow';
+    this.arrow.hidden = true;
+    this.arrow.innerHTML = `
+      <svg class="arrow-icon" viewBox="0 0 40 40" aria-hidden="true">
+        <path d="M6 7 L36 20 L6 33 L14 20 Z"/>
+      </svg>
+      <span class="arrow-dist"></span>
+    `;
+    this.arrowIcon = this.arrow.querySelector('svg')!;
+    this.arrowDist = this.arrow.querySelector('.arrow-dist')!;
+  }
+
+  /**
+   * Radar & Pfeil aktualisieren (jeden Frame aus main.ts, solange gejagt wird).
+   * Zeigt alle nicht gefangenen Geister (versteckte blass, böser rot, Time-Geist gold).
+   * Der Pfeil zeigt zum nächsten Geist, den man fangen soll (nie zum bösen).
+   */
+  updateRadar(ghosts: Ghost[], camera: Camera): void {
+    camera.getWorldPosition(this.camPos);
+    camera.getWorldDirection(this.camDir);
+    // Blickrichtung nur waagrecht (Radar ist eine Draufsicht)
+    const flat = Math.hypot(this.camDir.x, this.camDir.z) || 1;
+    const fx = this.camDir.x / flat;
+    const fz = this.camDir.z / flat;
+    const radius = (this.radar.clientWidth || 96) / 2 - 6;
+
+    const seen = new Set<number>();
+    let target: Ghost | null = null;
+    let targetDist = Infinity;
+
+    for (const ghost of ghosts) {
+      // gefangen oder noch nicht erschienen → nicht anzeigen
+      if (ghost.caught || !(ghost.object.visible || ghost.hidden)) continue;
+      seen.add(ghost.id);
+
+      ghost.object.getWorldPosition(this.ghostPos);
+      const dx = this.ghostPos.x - this.camPos.x;
+      const dz = this.ghostPos.z - this.camPos.z;
+      const dist = Math.hypot(dx, dz);
+
+      // In die Sicht des Spielers drehen: rechts = +x, vorne = oben
+      const right = -dx * fz + dz * fx;
+      const ahead = dx * fx + dz * fz;
+      const scale = (Math.min(dist, RADAR_RANGE) / RADAR_RANGE) * radius / (dist || 1);
+
+      let dot = this.radarDots.get(ghost.id);
+      if (!dot) {
+        dot = document.createElement('i');
+        this.radar.append(dot);
+        this.radarDots.set(ghost.id, dot);
+      }
+      const cls = `radar-dot type-${ghost.type}${ghost.hidden ? ' is-hidden' : ''}${dist > RADAR_RANGE ? ' is-edge' : ''}`;
+      if (dot.className !== cls) dot.className = cls;
+      dot.style.transform = `translate(${(right * scale).toFixed(1)}px, ${(-ahead * scale).toFixed(1)}px)`;
+
+      // Ziel für den Pfeil: sichtbare Geister vor versteckten, dann der nächste
+      if (ghost.type === 'evil') continue;
+      const better =
+        !target ||
+        (target.hidden && !ghost.hidden) ||
+        (target.hidden === ghost.hidden && dist < targetDist);
+      if (better) {
+        target = ghost;
+        targetDist = dist;
+      }
+    }
+
+    // Punkte von gefangenen / entfernten Geistern wegräumen
+    for (const [id, dot] of this.radarDots) {
+      if (!seen.has(id)) {
+        dot.remove();
+        this.radarDots.delete(id);
+      }
+    }
+
+    this.updateArrow(target, targetDist, camera);
+  }
+
+  private updateArrow(target: Ghost | null, dist: number, camera: Camera): void {
+    if (!target) {
+      this.arrow.hidden = true;
+      return;
+    }
+    target.object.getWorldPosition(this.ghostPos);
+    this.projected.copy(this.ghostPos).project(camera);
+    const local = camera.worldToLocal(this.ghostPos); // Kamera-Sicht: x rechts, y oben, z nach hinten
+    const inFront = local.z < 0;
+
+    // Geist ist gut im Bild → kein Pfeil nötig
+    if (inFront && Math.abs(this.projected.x) < 0.85 && Math.abs(this.projected.y) < 0.85) {
+      this.arrow.hidden = true;
+      return;
+    }
+
+    const halfW = window.innerWidth / 2;
+    const halfH = window.innerHeight / 2;
+    let sx: number;
+    let sy: number;
+    let behind = false;
+    if (inFront) {
+      // Richtung auf dem Bildschirm (Bildschirm-y zeigt nach unten)
+      sx = this.projected.x * halfW;
+      sy = -this.projected.y * halfH;
+    } else {
+      sx = local.x;
+      sy = -local.y * 0.3; // hinter dir zählt vor allem links/rechts
+      // fast genau hinter dir → Pfeil nach unten: „umdrehen"
+      if (Math.abs(local.x) < Math.abs(local.z) * 0.35) {
+        sx = 0;
+        sy = 1;
+        behind = true;
+      }
+    }
+
+    // An den Bildschirmrand schieben (mit Abstand zu Timer & Buttons)
+    const limits = [
+      sx !== 0 ? (halfW - ARROW_MARGIN.side) / Math.abs(sx) : Infinity,
+      sy < 0 ? (halfH - ARROW_MARGIN.top) / -sy : sy > 0 ? (halfH - ARROW_MARGIN.bottom) / sy : Infinity,
+    ];
+    const k = Math.min(...limits);
+    this.arrow.style.left = `${(halfW + sx * k).toFixed(0)}px`;
+    this.arrow.style.top = `${(halfH + sy * k).toFixed(0)}px`;
+    this.arrowIcon.style.transform = `rotate(${((Math.atan2(sy, sx) * 180) / Math.PI).toFixed(1)}deg)`;
+
+    const text = `${dist.toFixed(1)} m${behind ? ' · behind you' : ''}`;
+    if (text !== this.lastArrowText) {
+      this.arrowDist.textContent = text;
+      this.lastArrowText = text;
+    }
+    const cls = `hud-arrow type-${target.type}${target.hidden ? ' is-hidden' : ''}${behind ? ' is-behind' : ''}`;
+    if (this.arrow.className !== cls) this.arrow.className = cls;
+    this.arrow.hidden = false;
+  }
+
+  /** UV-Button & Akkubalken. Unter 20 % rot und blinkend. */
+  private updateUv(uvOn: boolean, battery: number): void {
+    const percent = Math.round(battery);
+    const key = `${uvOn}|${percent}`;
+    if (key === this.lastUvKey) return;
+    this.lastUvKey = key;
+
+    const empty = !uvOn && battery < 1;
+    this.uvButton.classList.toggle('is-on', uvOn);
+    this.uvButton.classList.toggle('is-low', percent < 20);
+    this.uvButton.classList.toggle('is-empty', empty);
+    this.uvLabel.textContent = empty ? 'EMPTY' : uvOn ? 'UV ON' : 'UV OFF';
+    this.batteryText.textContent = `${percent} %`;
+    this.batteryFill.style.width = `${percent}%`;
   }
 
   /**
@@ -525,6 +829,8 @@ export class Hud {
       (this.lostScreen.querySelector<HTMLElement>(`[data-stat="${stat}"]`)!.textContent = value);
     set('ghosts', `${state.ghostsTotal - state.ghostsLeft}/${state.ghostsTotal}`);
     set('score', String(state.score));
+    this.lostScreen.querySelector<HTMLElement>('[data-action="retry"]')!.innerHTML =
+      `↻&nbsp; Try Again – Level ${state.level}`;
     this.show(this.lostScreen);
   }
 
@@ -554,6 +860,10 @@ export class Hud {
     set('score', String(state.score));
     const seconds = Math.floor(state.time);
     set('time', `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`);
+    this.completeScreen.querySelector<HTMLElement>('.complete-sub')!.textContent =
+      `Level ${state.level} cleared. The house is quiet… for now.`;
+    this.completeScreen.querySelector<HTMLElement>('[data-action="next"]')!.textContent =
+      `Level ${state.level + 1} ▶`;
     this.show(this.completeScreen);
   }
 
@@ -572,7 +882,9 @@ export class Hud {
     this.showHowToPage(0);
   }
 
-  showSettings(): void {
+  /** @param from Von wo aus geöffnet → dorthin führt der ←-Button zurück */
+  showSettings(from: 'start' | 'pause' = 'start'): void {
+    this.settingsReturn = from;
     this.show(this.settingsScreen);
   }
 
@@ -604,6 +916,25 @@ export class Hud {
   // ---------- jeden Frame ----------
 
   update(state: GameSnapshot): void {
+    if (state.level !== this.lastLevel) {
+      this.levelBadge.innerHTML = `<small>Level</small><b>${state.level}</b>`;
+      this.lastLevel = state.level;
+    }
+    if (state.score !== this.lastScore) {
+      // Punkte dazu → kurz aufleuchten
+      if (state.score > this.lastScore && this.lastScore >= 0) {
+        this.scoreBadge.classList.remove('bump');
+        void this.scoreBadge.offsetWidth;
+        this.scoreBadge.classList.add('bump');
+      }
+      this.scoreValue.textContent = String(state.score);
+      this.lastScore = state.score;
+    }
+    this.updateUv(state.uvOn, state.battery);
+    // Pause-Menü zeigen, solange pausiert (auch bei Auto-Pause durch Tab-Wechsel)
+    const showPause = state.paused && state.status === 'playing';
+    if (this.pauseOverlay.hidden === showPause) this.pauseOverlay.hidden = !showPause;
+
     if (state.ghostsLeft !== this.lastGhostsLeft) {
       this.ghostsLeftNumber.textContent = String(state.ghostsLeft);
       this.lastGhostsLeft = state.ghostsLeft;

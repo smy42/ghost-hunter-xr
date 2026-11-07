@@ -48,6 +48,14 @@ const hud = new Hud({
     desktop.lock();
   },
   onMenu: () => playMenuAudio(),
+  // Buttons für Touch-Geräte (Desktop: P und F)
+  onPause: () => {
+    if (game.snapshot.status === 'playing') pauseGame();
+  },
+  onResume: () => resumeGame(),
+  onToggleUv: () => {
+    if (game.snapshot.status === 'playing' && !game.snapshot.paused) game.toggleUv();
+  },
 });
 
 /** Ein Fangversuch – egal ob Capture-Button, Linksklick oder E. */
@@ -216,6 +224,7 @@ function startRound(center: THREE.Vector3): void {
   );
 
   game.start(ghosts, game.currentLevel);
+  hud.showLevelIntro(game.currentLevel); // „Level 2 – They are moving…"
   startRoundAudio(ghosts);
 }
 
@@ -320,6 +329,7 @@ renderer.setAnimationLoop(() => {
   lastStatusForCursor = state.status;
   hud.update(state);
   hud.updateAim(game.aim);
+  if (hud.isHunting) hud.updateRadar(ghosts, camera); // Radar & Pfeil zum nächsten Geist
   renderer.render(scene, camera);
 });
 
